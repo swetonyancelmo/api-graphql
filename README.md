@@ -46,7 +46,7 @@ O projeto está em evolução. O que já existe e o que está planejado:
 - [x] Bloqueio de email duplicado
 - [x] PostgreSQL via Docker Compose
 - [x] Configuração por variáveis de ambiente
-- [ ] Testes unitários e e2e
+- [x] Testes unitários (services) e e2e (GraphQL + PostgreSQL de teste)
 - [ ] Migrations (hoje o TypeORM usa `synchronize`, só para desenvolvimento)
 - [ ] Autenticação com JWT
 - [ ] Segunda entidade (`Post`) com relação 1:N com `User`
@@ -96,6 +96,7 @@ Para parar o banco: `docker compose down` (adicione `-v` para apagar também os 
 | `DB_USER` | `postgres` | Usuário do banco |
 | `DB_PASSWORD` | `postgres` | Senha do banco |
 | `DB_NAME` | `estudos_graphql` | Nome do banco |
+| `DB_TEST_NAME` | `estudos_graphql_test` | Banco usado pelos testes e2e (criado automaticamente) |
 
 ## Exemplos de uso
 
@@ -171,7 +172,7 @@ src/
 
 Ordem planejada de evolução:
 
-1. **Testes.** Unitários do `UsersService` e e2e batendo em `/graphql` com `supertest`, com cobertura no CI.
+1. **Testes.** ~~Unitários e e2e~~ (feito). Falta rodar tudo com cobertura no CI e cobrir resolvers e autorização.
 2. **Migrations.** Trocar `synchronize` por migrations versionadas do TypeORM.
 3. **Autenticação.** JWT com `@nestjs/passport`, `AuthGuard` e decorator `@CurrentUser()` adaptado ao contexto GraphQL.
 4. **Relações e N+1.** Entidade `Post` ligada a `User`, `@ResolveField` e DataLoader para agrupar consultas.
@@ -189,9 +190,9 @@ Ordem planejada de evolução:
 | `npm run start:prod` | Executa a versão compilada |
 | `npm run lint` | Roda o ESLint com correção automática |
 | `npm run format` | Formata o código com Prettier |
-| `npm test` | Testes unitários |
+| `npm test` | Testes unitários (mock do repositório) |
 | `npm run test:cov` | Testes com relatório de cobertura |
-| `npm run test:e2e` | Testes end-to-end |
+| `npm run test:e2e` | Testes end-to-end contra o PostgreSQL de teste (requer `docker compose up -d`) |
 
 ## Licença
 

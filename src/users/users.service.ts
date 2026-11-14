@@ -30,7 +30,7 @@ export class UsersService {
       ...input,
       password: await bcrypt.hash(input.password, 10),
     });
-    
+
     const saved = await this.usersRepository.save(user);
 
     const { password: _password, ...safe } = saved;
