@@ -49,7 +49,8 @@ O projeto está em evolução. O que já existe e o que está planejado:
 - [x] Testes unitários (services) e e2e (GraphQL + PostgreSQL de teste)
 - [ ] Migrations (hoje o TypeORM usa `synchronize`, só para desenvolvimento)
 - [x] Autenticação com JWT: `login`, guard global, `@Public()` e `@CurrentUser()`
-- [ ] Segunda entidade (`Post`) com relação 1:N com `User`
+- [x] Módulo de produtos com relação 1:N com `User`: cada usuário só enxerga e altera os próprios produtos
+- [ ] Ajuste de estoque atômico (`adjustStock`) e histórico de movimentações
 - [ ] DataLoader para evitar N+1
 - [ ] Paginação, filtros e ordenação
 - [ ] Subscriptions
@@ -169,6 +170,31 @@ query {
 }
 ```
 
+### Gerenciar produtos
+
+Todas as operações de produto exigem token e atuam apenas nos produtos do usuário logado. O preço é informado em centavos (`19990` = R$ 199,90).
+
+```graphql
+mutation {
+  createProduct(
+    input: { name: "Teclado", description: "Mecânico", quantity: 10, unitPriceCents: 19990 }
+  ) {
+    id
+    name
+    quantity
+    unitPriceCents
+  }
+}
+
+query { products { id name quantity } }
+
+mutation { updateProduct(id: "UUID", input: { quantity: 7 }) { id quantity } }
+
+mutation { deleteProduct(id: "UUID") { id name } }
+```
+
+Acessar, alterar ou remover o produto de outro usuário responde como se ele não existisse (`product` retorna `null`; `updateProduct` e `deleteProduct` retornam "não encontrado"), para não revelar IDs alheios.
+
 ### Erros esperados
 
 - Sem token, token malformado, expirado ou de usuário removido: `UNAUTHENTICATED`. O login com senha errada e com email inexistente devolvem a mesma mensagem (*"Credenciais inválidas."*), para não revelar quais emails existem.
@@ -189,6 +215,11 @@ src/
 │   ├── auth.resolver.ts           # Mutation `login`
 │   ├── jwt-auth.guard.ts          # Valida o Bearer token e carrega o usuário
 │   └── decorators/                # @Public() e @CurrentUser()
+├── products/
+│   ├── product.entity.ts          # Tabela `products` (FK `ownerId` → `users`, índice, cascade)
+│   ├── product.service.ts         # Toda consulta é filtrada pelo dono
+│   ├── product.resolver.ts        # Usa @CurrentUser() para obter o dono
+│   └── dto/                       # Inputs de criação e atualização parcial
 └── users/
     ├── dto/
     │   └── create-user.input.ts   # Input da mutation + regras de validação
@@ -206,6 +237,7 @@ src/
 - **Resolver fino, service com a lógica.** O resolver só traduz GraphQL em chamadas ao service, o que facilita testar a regra de negócio isolada.
 - **Seguro por padrão.** O `JwtAuthGuard` é global: toda operação exige token, e só as marcadas com `@Public()` escapam. Esquecer de proteger uma rota nova não deixa um buraco.
 - **JWT sem Passport.** Para um único fluxo com Bearer token, `@nestjs/jwt` com um guard próprio é menos código e menos indireção. O guard também confere se o usuário do token ainda existe.
+- **Isolamento por dono na camada de serviço.** O `ownerId` nunca vem do cliente: o resolver o extrai do token e o service o aplica em toda consulta. Produto alheio responde como inexistente, e os testes e2e cobrem leitura, atualização e remoção entre dois usuários.
 - **Hash de senha com bcrypt.** A coluna `password` usa `select: false`, então ela nem é carregada nas consultas comuns.
 - **UUID como chave primária.** Evita IDs previsíveis e colisões.
 - **`synchronize: true` só para estudo.** É prático em desenvolvimento, mas em produção o caminho correto é usar migrations (item do roadmap).

@@ -49,6 +49,8 @@ type Query {
   """Usuário autenticado."""
   me: User!
   product(id: ID!): Product
+
+  """Produtos do usuário autenticado."""
   products: [Product!]!
   user(id: ID!): User
   users: [User!]!

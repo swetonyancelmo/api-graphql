@@ -2,9 +2,13 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { UserEntity } from '../users/user.entity';
 
 @Entity('products')
 export class ProductEntity {
@@ -20,9 +24,16 @@ export class ProductEntity {
   @Column({ type: 'int', default: 0 })
   quantity: number;
 
-  // Preço em centavos: evita erros de arredondamento de ponto flutuante.
   @Column({ type: 'int' })
   unitPriceCents: number;
+
+  @ManyToOne(() => UserEntity, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'ownerId' })
+  owner: UserEntity;
+
+  @Index()
+  @Column({ type: 'uuid' })
+  ownerId: string;
 
   @CreateDateColumn()
   createdAt: Date;

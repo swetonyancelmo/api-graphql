@@ -1,38 +1,53 @@
 import { Args, ID, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { ProductDto } from './product.object-type';
-import { ProductService } from './product.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { UserEntity } from '../users/user.entity';
 import { CreateProductInput } from './dto/create-product.input';
 import { UpdateProductInput } from './dto/update-product.input';
+import { ProductDto } from './product.object-type';
+import { ProductService } from './product.service';
 
 @Resolver(() => ProductDto)
 export class ProductResolver {
   constructor(private readonly productService: ProductService) {}
 
-  @Query(() => [ProductDto], { name: 'products' })
-  findAll() {
-    return this.productService.findAll();
+  @Query(() => [ProductDto], {
+    name: 'products',
+    description: 'Produtos do usuário autenticado.',
+  })
+  findAll(@CurrentUser() user: UserEntity) {
+    return this.productService.findAll(user.id);
   }
 
   @Query(() => ProductDto, { name: 'product', nullable: true })
-  findOne(@Args('id', { type: () => ID }) id: string) {
-    return this.productService.findOne(id);
+  findOne(
+    @CurrentUser() user: UserEntity,
+    @Args('id', { type: () => ID }) id: string,
+  ) {
+    return this.productService.findOne(id, user.id);
   }
 
   @Mutation(() => ProductDto, { name: 'createProduct' })
-  createProduct(@Args('input') createProductInput: CreateProductInput) {
-    return this.productService.create(createProductInput);
+  createProduct(
+    @CurrentUser() user: UserEntity,
+    @Args('input') createProductInput: CreateProductInput,
+  ) {
+    return this.productService.create(user.id, createProductInput);
   }
 
   @Mutation(() => ProductDto, { name: 'updateProduct' })
   updateProduct(
+    @CurrentUser() user: UserEntity,
     @Args('id', { type: () => ID }) id: string,
     @Args('input') updateProductInput: UpdateProductInput,
   ) {
-    return this.productService.update(id, updateProductInput);
+    return this.productService.update(id, user.id, updateProductInput);
   }
 
   @Mutation(() => ProductDto, { name: 'deleteProduct' })
-  deleteProduct(@Args('id', { type: () => ID }) id: string) {
-    return this.productService.remove(id);
+  deleteProduct(
+    @CurrentUser() user: UserEntity,
+    @Args('id', { type: () => ID }) id: string,
+  ) {
+    return this.productService.remove(id, user.id);
   }
 }

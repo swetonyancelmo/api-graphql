@@ -263,6 +263,50 @@ describe('API GraphQL (e2e)', () => {
       expect(list.body.data.products).toEqual([]);
     });
 
+    it('associa o produto criado ao usuário autenticado', async () => {
+      const token = await authenticate();
+      await createProduct(token);
+
+      const [row] = await dataSource.query(
+        'SELECT p."ownerId", u.id AS "userId" FROM products p JOIN users u ON u.id = p."ownerId"',
+      );
+      expect(row.ownerId).toBe(row.userId);
+    });
+
+    it('não aceita ownerId no input (o dono é sempre o usuário logado)', async () => {
+      const token = await authenticate();
+      const other = await signUp('outro@exemplo.com');
+      const otherId = other.body.data.createUser.id;
+
+      const res = await gql(
+        `mutation {
+          createProduct(input: {
+            name: "X", description: "", quantity: 1, unitPriceCents: 1,
+            ownerId: "${otherId}"
+          }) { id }
+        }`,
+        token,
+      );
+
+      expect(res.body.errors[0].message).toContain('ownerId');
+      const [{ count }] = await dataSource.query(
+        'SELECT count(*) FROM products',
+      );
+      expect(count).toBe('0');
+    });
+
+    it('remove os produtos junto com o usuário (cascade)', async () => {
+      const token = await authenticate();
+      await createProduct(token);
+
+      await dataSource.query('DELETE FROM users');
+
+      const [{ count }] = await dataSource.query(
+        'SELECT count(*) FROM products',
+      );
+      expect(count).toBe('0');
+    });
+
     it('rejeita quantidade negativa', async () => {
       const token = await authenticate();
 
@@ -286,6 +330,88 @@ describe('API GraphQL (e2e)', () => {
 
       expect(update.body.errors[0].message).toContain('não encontrado');
       expect(remove.body.errors[0].message).toContain('não encontrado');
+    });
+  });
+
+  describe('isolamento entre usuários', () => {
+    let tokenA: string;
+    let tokenB: string;
+    let productId: string;
+
+    beforeEach(async () => {
+      tokenA = await authenticate('a@exemplo.com');
+      tokenB = await authenticate('b@exemplo.com');
+      const created = await createProduct(tokenA);
+      productId = created.body.data.createProduct.id;
+    });
+
+    it('cada usuário lista apenas os próprios produtos', async () => {
+      await createProduct(tokenB, 3);
+
+      const a = await gql('{ products { id quantity } }', tokenA);
+      const b = await gql('{ products { id quantity } }', tokenB);
+
+      expect(a.body.data.products).toHaveLength(1);
+      expect(a.body.data.products[0].id).toBe(productId);
+      expect(b.body.data.products).toHaveLength(1);
+      expect(b.body.data.products[0].quantity).toBe(3);
+    });
+
+    it('outro usuário não consegue ler o produto (retorna null)', async () => {
+      const res = await gql(
+        `{ product(id: "${productId}") { id name } }`,
+        tokenB,
+      );
+
+      expect(res.body.data.product).toBeNull();
+    });
+
+    it('outro usuário não consegue atualizar o produto', async () => {
+      const res = await gql(
+        `mutation { updateProduct(id: "${productId}", input: { name: "Invadido" }) { id } }`,
+        tokenB,
+      );
+
+      expect(res.body.errors[0].message).toContain('não encontrado');
+      const [row] = await dataSource.query('SELECT name FROM products');
+      expect(row.name).toBe('Teclado');
+    });
+
+    it('outro usuário não consegue remover o produto', async () => {
+      const res = await gql(
+        `mutation { deleteProduct(id: "${productId}") { id } }`,
+        tokenB,
+      );
+
+      expect(res.body.errors[0].message).toContain('não encontrado');
+      const [{ count }] = await dataSource.query(
+        'SELECT count(*) FROM products',
+      );
+      expect(count).toBe('1');
+    });
+
+    it('a resposta para produto alheio é igual à de produto inexistente', async () => {
+      const missing = '00000000-0000-0000-0000-000000000000';
+      const foreign = await gql(
+        `mutation { deleteProduct(id: "${productId}") { id } }`,
+        tokenB,
+      );
+      const absent = await gql(
+        `mutation { deleteProduct(id: "${missing}") { id } }`,
+        tokenB,
+      );
+
+      // Só o ID na mensagem muda, então não dá para descobrir se o ID existe.
+      const normalize = (msg: string) => msg.replace(/[0-9a-f-]{36}/, '<id>');
+      expect(normalize(foreign.body.errors[0].message)).toBe(
+        normalize(absent.body.errors[0].message),
+      );
+    });
+
+    it('o dono continua conseguindo acessar o produto', async () => {
+      const res = await gql(`{ product(id: "${productId}") { name } }`, tokenA);
+
+      expect(res.body.data.product).toEqual({ name: 'Teclado' });
     });
   });
 });

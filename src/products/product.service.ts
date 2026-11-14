@@ -12,35 +12,44 @@ export class ProductService {
     private readonly productsRepository: Repository<ProductEntity>,
   ) {}
 
-  findAll(): Promise<ProductEntity[]> {
-    return this.productsRepository.find({ order: { createdAt: 'ASC' } });
+  findAll(ownerId: string): Promise<ProductEntity[]> {
+    return this.productsRepository.find({
+      where: { ownerId },
+      order: { createdAt: 'ASC' },
+    });
   }
 
-  findOne(id: string): Promise<ProductEntity | null> {
-    return this.productsRepository.findOneBy({ id });
+  findOne(id: string, ownerId: string): Promise<ProductEntity | null> {
+    return this.productsRepository.findOneBy({ id, ownerId });
   }
 
-  create(input: CreateProductInput): Promise<ProductEntity> {
-    const product = this.productsRepository.create(input);
+  create(ownerId: string, input: CreateProductInput): Promise<ProductEntity> {
+    const product = this.productsRepository.create({ ...input, ownerId });
     return this.productsRepository.save(product);
   }
 
-  async update(id: string, input: UpdateProductInput): Promise<ProductEntity> {
-    const product = await this.findOrFail(id);
+  async update(
+    id: string,
+    ownerId: string,
+    input: UpdateProductInput,
+  ): Promise<ProductEntity> {
+    const product = await this.findOrFail(id, ownerId);
     Object.assign(product, input);
     return this.productsRepository.save(product);
   }
 
-  async remove(id: string): Promise<ProductEntity> {
-    const product = await this.findOrFail(id);
-    // O TypeORM zera o `id` da instância em `remove()`, então devolvemos uma cópia.
+  async remove(id: string, ownerId: string): Promise<ProductEntity> {
+    const product = await this.findOrFail(id, ownerId);
     const removed = { ...product };
     await this.productsRepository.remove(product);
     return removed;
   }
 
-  private async findOrFail(id: string): Promise<ProductEntity> {
-    const product = await this.productsRepository.findOneBy({ id });
+  private async findOrFail(
+    id: string,
+    ownerId: string,
+  ): Promise<ProductEntity> {
+    const product = await this.findOne(id, ownerId);
     if (!product) {
       throw new NotFoundException(`Produto com ID ${id} não encontrado.`);
     }
