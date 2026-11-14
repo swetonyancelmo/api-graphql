@@ -2,6 +2,11 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+type AuthPayload {
+  """JWT para enviar no header `Authorization: Bearer <token>`."""
+  accessToken: String!
+}
+
 input CreateProductInput {
   description: String!
   name: String!
@@ -17,10 +22,16 @@ input CreateUserInput {
   password: String!
 }
 
+input LoginInput {
+  email: String!
+  password: String!
+}
+
 type Mutation {
   createProduct(input: CreateProductInput!): Product!
   createUser(input: CreateUserInput!): User!
   deleteProduct(id: ID!): Product!
+  login(input: LoginInput!): AuthPayload!
   updateProduct(id: ID!, input: UpdateProductInput!): Product!
 }
 
@@ -35,6 +46,8 @@ type Product {
 }
 
 type Query {
+  """Usuário autenticado."""
+  me: User!
   product(id: ID!): Product
   products: [Product!]!
   user(id: ID!): User

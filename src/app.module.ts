@@ -6,6 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 import { UsersModule } from './users/users.module';
 import { ProductModule } from './products/product.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { ProductModule } from './products/product.module';
       }),
     }),
     UsersModule,
+    AuthModule,
     ProductModule,
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,

@@ -20,6 +20,13 @@ export class UsersService {
     return this.usersRepository.findOneBy({ id });
   }
 
+  findByEmailWithPassword(email: string): Promise<UserEntity | null> {
+    return this.usersRepository.findOne({
+      where: { email },
+      select: { id: true, name: true, email: true, password: true },
+    });
+  }
+
   async create(input: CreateUserInput): Promise<UserEntity> {
     const exists = await this.usersRepository.existsBy({ email: input.email });
     if (exists) {

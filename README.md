@@ -28,7 +28,7 @@ API GraphQL construída com **NestJS**, **Apollo Server**, **TypeORM** e **Postg
 | Banco de dados | PostgreSQL 16 |
 | ORM | TypeORM |
 | Validação | class-validator + class-transformer |
-| Segurança | bcrypt (hash de senha) |
+| Segurança | bcrypt (hash de senha) e JWT (`@nestjs/jwt`) |
 | Configuração | @nestjs/config + `.env` |
 | Infra local | Docker Compose |
 | Qualidade | ESLint, Prettier, Jest |
@@ -48,7 +48,7 @@ O projeto está em evolução. O que já existe e o que está planejado:
 - [x] Configuração por variáveis de ambiente
 - [x] Testes unitários (services) e e2e (GraphQL + PostgreSQL de teste)
 - [ ] Migrations (hoje o TypeORM usa `synchronize`, só para desenvolvimento)
-- [ ] Autenticação com JWT
+- [x] Autenticação com JWT: `login`, guard global, `@Public()` e `@CurrentUser()`
 - [ ] Segunda entidade (`Post`) com relação 1:N com `User`
 - [ ] DataLoader para evitar N+1
 - [ ] Paginação, filtros e ordenação
@@ -96,6 +96,8 @@ Para parar o banco: `docker compose down` (adicione `-v` para apagar também os 
 | `DB_USER` | `postgres` | Usuário do banco |
 | `DB_PASSWORD` | `postgres` | Senha do banco |
 | `DB_NAME` | `estudos_graphql` | Nome do banco |
+| `JWT_SECRET` | *(obrigatória)* | Segredo de assinatura do JWT, com no mínimo 32 caracteres. Gere com `openssl rand -base64 48` |
+| `JWT_EXPIRES_IN` | `1h` | Validade do token (ex.: `15m`, `1h`, `7d`) |
 | `DB_TEST_NAME` | `estudos_graphql_test` | Banco usado pelos testes e2e (criado automaticamente) |
 
 ## Exemplos de uso
@@ -107,6 +109,36 @@ mutation {
   createUser(
     input: { name: "Ana", email: "ana@exemplo.com", password: "segredo123" }
   ) {
+    id
+    name
+    email
+  }
+}
+```
+
+### Fazer login
+
+`createUser` e `login` são públicas. Todas as outras operações exigem token.
+
+```graphql
+mutation {
+  login(input: { email: "ana@exemplo.com", password: "segredo123" }) {
+    accessToken
+  }
+}
+```
+
+Envie o token no header de todas as demais requisições (no Apollo Sandbox, em *Headers*):
+
+```json
+{ "Authorization": "Bearer <accessToken>" }
+```
+
+### Consultar o usuário autenticado
+
+```graphql
+query {
+  me {
     id
     name
     email
@@ -139,6 +171,7 @@ query {
 
 ### Erros esperados
 
+- Sem token, token malformado, expirado ou de usuário removido: `UNAUTHENTICATED`. O login com senha errada e com email inexistente devolvem a mesma mensagem (*"Credenciais inválidas."*), para não revelar quais emails existem.
 - Email já cadastrado: `409 Conflict` com a mensagem *"Já existe um usuário com este email."*
 - Dados inválidos (nome vazio, email malformado, senha com menos de 6 caracteres): `400 Bad Request` com as mensagens de validação.
 
@@ -147,8 +180,15 @@ query {
 ```text
 src/
 ├── app.module.ts            # Módulo raiz: config, TypeORM e GraphQL
-├── main.ts                  # Bootstrap e ValidationPipe global
+├── main.ts                  # Bootstrap
+├── app.setup.ts             # ValidationPipe global (compartilhado com os testes e2e)
 ├── schema.gql               # Schema gerado automaticamente
+├── auth/
+│   ├── auth.module.ts             # JwtModule + guard global (APP_GUARD)
+│   ├── auth.service.ts            # Valida credenciais e assina o JWT
+│   ├── auth.resolver.ts           # Mutation `login`
+│   ├── jwt-auth.guard.ts          # Valida o Bearer token e carrega o usuário
+│   └── decorators/                # @Public() e @CurrentUser()
 └── users/
     ├── dto/
     │   └── create-user.input.ts   # Input da mutation + regras de validação
@@ -164,6 +204,8 @@ src/
 - **Code-first.** O schema GraphQL é gerado a partir das classes TypeScript, então tipos e schema nunca ficam dessincronizados.
 - **Entidade separada do tipo GraphQL.** `UserEntity` (banco) e `UserDto` (API) são classes distintas. Assim campos sensíveis, como a senha, não vazam por acidente para o schema.
 - **Resolver fino, service com a lógica.** O resolver só traduz GraphQL em chamadas ao service, o que facilita testar a regra de negócio isolada.
+- **Seguro por padrão.** O `JwtAuthGuard` é global: toda operação exige token, e só as marcadas com `@Public()` escapam. Esquecer de proteger uma rota nova não deixa um buraco.
+- **JWT sem Passport.** Para um único fluxo com Bearer token, `@nestjs/jwt` com um guard próprio é menos código e menos indireção. O guard também confere se o usuário do token ainda existe.
 - **Hash de senha com bcrypt.** A coluna `password` usa `select: false`, então ela nem é carregada nas consultas comuns.
 - **UUID como chave primária.** Evita IDs previsíveis e colisões.
 - **`synchronize: true` só para estudo.** É prático em desenvolvimento, mas em produção o caminho correto é usar migrations (item do roadmap).
@@ -174,7 +216,7 @@ Ordem planejada de evolução:
 
 1. **Testes.** ~~Unitários e e2e~~ (feito). Falta rodar tudo com cobertura no CI e cobrir resolvers e autorização.
 2. **Migrations.** Trocar `synchronize` por migrations versionadas do TypeORM.
-3. **Autenticação.** JWT com `@nestjs/passport`, `AuthGuard` e decorator `@CurrentUser()` adaptado ao contexto GraphQL.
+3. **Autenticação.** ~~JWT, guard global e `@CurrentUser()`~~ (feito). Falta refresh token e rate limit no login.
 4. **Relações e N+1.** Entidade `Post` ligada a `User`, `@ResolveField` e DataLoader para agrupar consultas.
 5. **Consultas avançadas.** Paginação (cursor ou offset), filtros e ordenação.
 6. **Tempo real.** Subscriptions via WebSocket.
