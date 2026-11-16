@@ -1,27 +1,22 @@
 # Estudos GraphQL
 
 [![CI](https://github.com/swetonyancelmo/api-graphql/actions/workflows/ci.yml/badge.svg)](https://github.com/swetonyancelmo/api-graphql/actions/workflows/ci.yml)
-
-API GraphQL construída com **NestJS**, **Apollo Server**, **TypeORM** e **PostgreSQL**, desenvolvida como projeto de estudo para praticar boas práticas de back-end: camadas bem separadas, validação, persistência real, testes e CI.
-
 ![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)
 ![GraphQL](https://img.shields.io/badge/GraphQL-16-E10098?logo=graphql&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)
 
-## Sumário
+API GraphQL para **cadastro de produtos e controle de estoque**. Cada usuário se cadastra, faz login e gerencia apenas os próprios produtos, registrando entradas e saídas de estoque com histórico completo.
 
-- [Stack](#stack)
-- [Status do projeto](#status-do-projeto)
-- [Como rodar](#como-rodar)
-- [Exemplos de uso](#exemplos-de-uso)
-- [Estrutura de pastas](#estrutura-de-pastas)
-- [Decisões de design](#decisões-de-design)
-- [Roadmap](#roadmap)
-- [Scripts](#scripts)
+## Funcionalidades
 
-## Stack
+- **Autenticação com JWT:** cadastro e login, com senha armazenada em hash (bcrypt).
+- **Produtos por usuário:** cada usuário só enxerga e altera os seus próprios produtos.
+- **Estoque seguro:** o ajuste é atômico, então o saldo nunca fica negativo, mesmo com várias requisições simultâneas.
+- **Histórico de movimentações:** cada entrada e saída é registrada com saldo resultante e motivo.
+- **Erros padronizados:** códigos estáveis e validação detalhada, sem expor detalhes internos.
+
+## Tecnologias
 
 | Camada | Tecnologia |
 | --- | --- |
@@ -35,129 +30,31 @@ API GraphQL construída com **NestJS**, **Apollo Server**, **TypeORM** e **Postg
 | Infra local | Docker Compose |
 | Qualidade | ESLint, Prettier, Jest |
 
-## Status do projeto
-
-O projeto está em evolução. O que já existe e o que está planejado:
-
-- [x] API GraphQL com schema gerado automaticamente (`src/schema.gql`)
-- [x] Módulo de usuários: listar, buscar por ID e criar
-- [x] Validação de entrada com mensagens customizadas
-- [x] Persistência em PostgreSQL com TypeORM
-- [x] IDs em UUID
-- [x] Senha armazenada com hash bcrypt, nunca exposta no schema
-- [x] Bloqueio de email duplicado
-- [x] PostgreSQL via Docker Compose
-- [x] Configuração por variáveis de ambiente
-- [x] Testes unitários (services) e e2e (GraphQL + PostgreSQL de teste)
-- [x] Migrations versionadas do TypeORM (`synchronize` desligado); a API recusa subir com migrations pendentes
-- [x] Autenticação com JWT: `login`, guard global, `@Public()` e `@CurrentUser()`
-- [x] Módulo de produtos com relação 1:N com `User`: cada usuário só enxerga e altera os próprios produtos
-- [x] Ajuste de estoque atômico (`adjustStock`), com proteção contra estoque negativo sob concorrência
-- [x] Histórico de movimentações de estoque (`stockMovements`), gravado na mesma transação do ajuste
-- [ ] DataLoader para evitar N+1
-- [ ] Paginação, filtros e ordenação
-- [ ] Subscriptions
-- [x] Tratamento de erros padronizado (`formatError`): códigos estáveis, validação detalhada e nenhum detalhe interno exposto
-- [x] CI com GitHub Actions: lint, tipos, build, testes unitários, migrations e e2e com PostgreSQL
-- [ ] Dockerfile multi-stage e deploy
-
-Veja detalhes no [Roadmap](#roadmap).
-
 ## Como rodar
 
-### Pré-requisitos
-
-- Node.js 24 (a versão está no arquivo `.nvmrc`; com o nvm, basta `nvm use`)
-- Docker e Docker Compose
-
-### Passo a passo
+Requisitos: Node.js 24 e Docker.
 
 ```bash
-# 1. Instale as dependências
 npm install
-
-# 2. Crie o arquivo de ambiente
 cp .env.example .env
-
-# 3. Suba o PostgreSQL
-docker compose up -d
-
-# 4. Crie as tabelas aplicando as migrations
-npm run migration:run
-
-# 5. Inicie a API em modo desenvolvimento
-npm run start:dev
+docker compose up -d        # sobe o PostgreSQL
+npm run migration:run       # cria as tabelas
+npm run start:dev           # inicia a API
 ```
 
-Abra o Apollo Sandbox em **http://localhost:3000/graphql** para explorar o schema e executar queries.
+Abra **http://localhost:3000/graphql** para explorar o schema e testar as operações no Apollo Sandbox.
 
-Para parar o banco: `docker compose down` (adicione `-v` para apagar também os dados). Para recriar o banco do zero já com o schema atual: `npm run db:reset` (**apaga todos os dados**).
-
-## Migrations
-
-O schema do banco só muda por migrations versionadas em `src/database/migrations/`; o TypeORM nunca altera as tabelas sozinho (`synchronize: false`). Se houver migrations pendentes, a API não inicia e informa o comando a executar.
-
-Fluxo ao mudar uma entidade:
-
-```bash
-# 1. Edite a entidade (ex.: adicione uma coluna)
-
-# 2. Gere a migration comparando as entidades com o banco migrado
-npm run migration:generate -- src/database/migrations/AddPhoneToUsers
-
-# 3. REVISE o SQL gerado e aplique
-npm run migration:run
-```
-
-| Comando | O que faz |
-| --- | --- |
-| `npm run migration:run` | Aplica as migrations pendentes (cada uma roda em transação) |
-| `npm run migration:revert` | Desfaz a última migration aplicada |
-| `npm run migration:show` | Lista as migrations e se já foram aplicadas |
-| `npm run migration:generate -- <caminho>` | Gera uma migration a partir da diferença entre as entidades e o banco |
-| `npm run migration:create -- <caminho>` | Cria uma migration vazia, para SQL escrito à mão |
-| `npm run migration:check` | Falha (código 1) se as entidades divergem das migrations; ideal para o CI |
-| `npm run migration:run:prod` | Aplica as migrations a partir do código compilado (`dist/`), sem ts-node |
-
-Em produção: `npm run build && npm run migration:run:prod && npm run start:prod`.
-
-> Já tinha um banco criado antes das migrations (pelo `synchronize`)? Rodar `migration:run` nele falha com `relation "users" already exists`, sem alterar nada. Recrie-o com `npm run db:reset` (apaga os dados).
-
-### Variáveis de ambiente
-
-| Variável | Padrão | Descrição |
-| --- | --- | --- |
-| `PORT` | `3000` | Porta da API |
-| `DB_HOST` | `localhost` | Host do PostgreSQL |
-| `DB_PORT` | `5432` | Porta do PostgreSQL |
-| `DB_USER` | `postgres` | Usuário do banco |
-| `DB_PASSWORD` | `postgres` | Senha do banco |
-| `DB_NAME` | `estudos_graphql` | Nome do banco |
-| `JWT_SECRET` | *(obrigatória)* | Segredo de assinatura do JWT, com no mínimo 32 caracteres. Gere com `openssl rand -base64 48` |
-| `JWT_EXPIRES_IN` | `1h` | Validade do token (ex.: `15m`, `1h`, `7d`) |
-| `DB_TEST_NAME` | `estudos_graphql_test` | Banco usado pelos testes e2e (criado automaticamente) |
-
-## Exemplos de uso
-
-### Criar um usuário
+## Exemplo de uso
 
 ```graphql
+# 1. Criar um usuário
 mutation {
-  createUser(
-    input: { name: "Ana", email: "ana@exemplo.com", password: "segredo123" }
-  ) {
+  createUser(input: { name: "Ana", email: "ana@exemplo.com", password: "segredo123" }) {
     id
-    name
-    email
   }
 }
-```
 
-### Fazer login
-
-`createUser` e `login` são públicas. Todas as outras operações exigem token.
-
-```graphql
+# 2. Fazer login e copiar o token
 mutation {
   login(input: { email: "ana@exemplo.com", password: "segredo123" }) {
     accessToken
@@ -165,104 +62,29 @@ mutation {
 }
 ```
 
-Envie o token no header de todas as demais requisições (no Apollo Sandbox, em *Headers*):
-
-```json
-{ "Authorization": "Bearer <accessToken>" }
-```
-
-### Consultar o usuário autenticado
+Nas demais requisições, envie o header `Authorization: Bearer <accessToken>`:
 
 ```graphql
-query {
-  me {
-    id
-    name
-    email
-  }
-}
-```
-
-### Listar usuários
-
-```graphql
-query {
-  users {
-    id
-    name
-    email
-  }
-}
-```
-
-### Buscar um usuário por ID
-
-```graphql
-query {
-  user(id: "COLE-O-UUID-AQUI") {
-    name
-    email
-  }
-}
-```
-
-### Gerenciar produtos
-
-Todas as operações de produto exigem token e atuam apenas nos produtos do usuário logado. O preço é informado em centavos (`19990` = R$ 199,90).
-
-```graphql
+# 3. Criar um produto com estoque inicial (preço em centavos)
 mutation {
   createProduct(
     input: { name: "Teclado", description: "Mecânico", quantity: 10, unitPriceCents: 19990 }
   ) {
     id
-    name
     quantity
-    unitPriceCents
   }
 }
 
-query { products { id name quantity } }
-
-mutation { updateProduct(id: "UUID", input: { name: "Teclado Gamer", unitPriceCents: 25000 }) { id name unitPriceCents } }
-
-mutation { deleteProduct(id: "UUID") { id name } }
-```
-
-### Ajustar o estoque
-
-A quantidade só é definida na criação do produto (saldo inicial). Depois disso, o estoque muda exclusivamente por `adjustStock`; o `updateProduct` não aceita `quantity`.
-
-`delta` positivo registra uma entrada e negativo, uma saída. A operação é atômica: o estoque nunca fica negativo, mesmo com várias requisições simultâneas.
-
-```graphql
+# 4. Registrar uma saída de 3 unidades
 mutation {
-  adjustStock(id: "UUID", input: { delta: -3 }) {
-    id
+  adjustStock(id: "ID_DO_PRODUTO", input: { delta: -3, reason: "Venda" }) {
     quantity
   }
 }
-```
 
-Opcionalmente, informe um motivo (até 200 caracteres) para constar no histórico:
-
-```graphql
-mutation {
-  adjustStock(id: "UUID", input: { delta: -3, reason: "Venda" }) {
-    quantity
-  }
-}
-```
-
-Regras: `delta` é um inteiro diferente de zero, entre -1.000.000 e 1.000.000; o estoque fica entre 0 e 1.000.000.000. Uma saída maior que o saldo responde *"Estoque insuficiente: há N unidade(s) e a saída é de M."* e não altera nada.
-
-### Consultar o histórico de estoque
-
-Lista as movimentações de um produto, da mais recente para a mais antiga. Criar um produto com `quantity > 0` registra a entrada inicial (*"Estoque inicial"*). `limit` (1 a 100, padrão 20) e `offset` paginam o resultado.
-
-```graphql
+# 5. Consultar o histórico do produto
 query {
-  stockMovements(productId: "UUID", limit: 10, offset: 0) {
+  stockMovements(productId: "ID_DO_PRODUTO") {
     delta
     quantityAfter
     reason
@@ -271,144 +93,11 @@ query {
 }
 ```
 
-A soma dos `delta` de um produto é sempre igual ao seu `quantity`, e o `quantityAfter` de cada linha é o saldo anterior mais o `delta`.
-
-Acessar, alterar ou remover o produto de outro usuário responde como se ele não existisse (`product` retorna `null`; `updateProduct` e `deleteProduct` retornam "não encontrado"), para não revelar IDs alheios.
-
-### Erros
-
-Toda falha traz um `extensions.code` estável, sem stacktrace nem detalhes internos:
-
-| Código | Quando acontece |
-| --- | --- |
-| `UNAUTHENTICATED` | Sem token, token malformado, expirado ou de usuário removido; login com credenciais erradas (a mesma mensagem para senha errada e email inexistente, para não revelar quais emails existem) |
-| `BAD_REQUEST` | Dados inválidos, ID que não é UUID, estoque insuficiente |
-| `NOT_FOUND` | Produto inexistente ou de outro usuário |
-| `CONFLICT` | Email já cadastrado |
-| `GRAPHQL_VALIDATION_FAILED` / `GRAPHQL_PARSE_FAILED` | Consulta com campo inexistente ou sintaxe inválida (códigos padrão do GraphQL) |
-| `INTERNAL_SERVER_ERROR` | Falha inesperada. A resposta é genérica (*"Erro interno do servidor."*) e o detalhe vai apenas para o log |
-
-Erros de validação listam cada problema em `extensions.validationErrors`:
-
-```json
-{
-  "errors": [
-    {
-      "message": "Dados de entrada inválidos.",
-      "path": ["createUser"],
-      "extensions": {
-        "code": "BAD_REQUEST",
-        "validationErrors": [
-          "O nome não pode estar vazio.",
-          "O email não é válido.",
-          "A senha deve ter pelo menos 6 caracteres."
-        ]
-      }
-    }
-  ]
-}
-```
-
-## Estrutura de pastas
-
-```text
-src/
-├── app.module.ts            # Módulo raiz: config, TypeORM e GraphQL
-├── main.ts                  # Bootstrap
-├── app.setup.ts             # ValidationPipe global (compartilhado com os testes e2e)
-├── database/
-│   ├── database.config.ts         # Configuração única do banco (app e CLI), synchronize desligado
-│   ├── data-source.ts             # DataSource usado pela CLI de migrations
-│   ├── pending-migrations.ts      # Impede a API de subir com migrations pendentes
-│   └── migrations/                # Migrations versionadas (up/down)
-├── common/
-│   ├── graphql-error.formatter.ts # formatError: códigos estáveis e erros internos escondidos
-│   ├── uuid.pipe.ts               # Valida argumentos ID antes de chegarem ao banco
-│   └── db-errors.ts               # Detecta violação de UNIQUE do PostgreSQL
-├── schema.gql               # Schema gerado automaticamente
-├── auth/
-│   ├── auth.module.ts             # JwtModule + guard global (APP_GUARD)
-│   ├── auth.service.ts            # Valida credenciais e assina o JWT
-│   ├── auth.resolver.ts           # Mutation `login`
-│   ├── jwt-auth.guard.ts          # Valida o Bearer token e carrega o usuário
-│   └── decorators/                # @Public() e @CurrentUser()
-├── products/
-│   ├── product.entity.ts          # Tabela `products` (FK `ownerId` → `users`, índice, cascade)
-│   ├── product.service.ts         # Toda consulta é filtrada pelo dono; ajustes em transação
-│   ├── stock-movement.entity.ts   # Livro-razão do estoque (tabela `stock_movements`)
-│   ├── product.resolver.ts        # Usa @CurrentUser() para obter o dono
-│   └── dto/                       # Inputs de criação e atualização parcial
-└── users/
-    ├── dto/
-    │   └── create-user.input.ts   # Input da mutation + regras de validação
-    ├── user.entity.ts             # Entidade TypeORM (tabela `users`)
-    ├── user.object-type.ts        # Tipo exposto no GraphQL
-    ├── users.resolver.ts          # Camada GraphQL (queries e mutations)
-    ├── users.service.ts           # Regras de negócio e acesso a dados
-    └── users.module.ts
-```
-
-## Decisões de design
-
-- **Code-first.** O schema GraphQL é gerado a partir das classes TypeScript, então tipos e schema nunca ficam dessincronizados.
-- **Entidade separada do tipo GraphQL.** `UserEntity` (banco) e `UserDto` (API) são classes distintas. Assim campos sensíveis, como a senha, não vazam por acidente para o schema.
-- **Resolver fino, service com a lógica.** O resolver só traduz GraphQL em chamadas ao service, o que facilita testar a regra de negócio isolada.
-- **Seguro por padrão.** O `JwtAuthGuard` é global: toda operação exige token, e só as marcadas com `@Public()` escapam. Esquecer de proteger uma rota nova não deixa um buraco.
-- **JWT sem Passport.** Para um único fluxo com Bearer token, `@nestjs/jwt` com um guard próprio é menos código e menos indireção. O guard também confere se o usuário do token ainda existe.
-- **Isolamento por dono na camada de serviço.** O `ownerId` nunca vem do cliente: o resolver o extrai do token e o service o aplica em toda consulta. Produto alheio responde como inexistente, e os testes e2e cobrem leitura, atualização e remoção entre dois usuários.
-- **Estoque atômico.** `adjustStock` é um único `UPDATE ... WHERE quantity + :delta BETWEEN 0 AND :max`. A regra vive no banco, então não existe a janela entre "ler o saldo" e "gravar o novo" em que duas requisições passariam juntas. Os testes e2e disparam dezenas de ajustes em paralelo e conferem o saldo final.
-- **Histórico como livro-razão.** Cada movimentação guarda a variação e o saldo resultante, e é gravada na mesma transação do `UPDATE` do estoque: ou os dois acontecem, ou nenhum. O `createdAt` usa `clock_timestamp()` (e não `now()`, que é o início da transação) para a ordem do histórico seguir a ordem real dos ajustes. Um teste e2e dispara 30 ajustes simultâneos e confere que a cadeia de saldos fecha.
-- **Erros previsíveis e sem vazamento.** O `formatError` converte as exceções de domínio em códigos estáveis e troca qualquer falha inesperada por uma resposta genérica, registrando o detalhe só no log. A unicidade do email é garantida pela constraint do banco, e a violação vira `CONFLICT`: cadastros simultâneos com o mesmo email não geram erro 500.
-- **Hash de senha com bcrypt.** A coluna `password` usa `select: false`, então ela nem é carregada nas consultas comuns.
-- **UUID como chave primária.** Evita IDs previsíveis e colisões.
-- **Migrations em vez de `synchronize`.** O schema evolui por arquivos versionados e revisáveis, com `up` e `down`. Os testes e2e recriam o banco de testes aplicando essas mesmas migrations, então elas são exercitadas a cada execução. A configuração do banco fica em um só lugar (`database.config.ts`), usada pela aplicação e pela CLI.
-
-## Roadmap
-
-Ordem planejada de evolução:
-
-1. **Testes.** ~~Unitários e e2e~~ (feito). Falta rodar tudo com cobertura no CI e cobrir resolvers e autorização.
-2. **Migrations.** ~~Trocar `synchronize` por migrations~~ (feito). Falta rodar `migration:check` no CI e, no deploy, aplicar as migrations antes de subir a nova versão.
-3. **Autenticação.** ~~JWT, guard global e `@CurrentUser()`~~ (feito). Falta refresh token e rate limit no login.
-4. **Relações e N+1.** Entidade `Post` ligada a `User`, `@ResolveField` e DataLoader para agrupar consultas.
-5. **Consultas avançadas.** Paginação (cursor ou offset), filtros e ordenação.
-6. **Tempo real.** Subscriptions via WebSocket.
-7. **Erros.** ~~`formatError` e códigos consistentes~~ (feito). Falta completar as descrições (`description`) nos `@Field` do schema.
-8. **Qualidade e entrega.** ~~GitHub Actions~~ (feito). Falta Husky, lint-staged e commitlint; Dockerfile multi-stage; deploy com link público.
-
-## Integração contínua (CI)
-
-A cada push em `main`/`master` e a cada Pull Request, o GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) roda dois jobs em paralelo:
-
-| Job | O que verifica |
-| --- | --- |
-| **Lint, tipos, build e testes unitários** | ESLint + Prettier, checagem de tipos de todo o código (inclusive dos testes), build e testes unitários com relatório de cobertura (guardado como *artifact*) |
-| **Migrations e testes e2e** | Sobe um PostgreSQL, aplica as migrations a partir do código compilado, confirma que as entidades não divergem delas (`migration:check`) e roda os testes end-to-end |
-
-Para rodar localmente as mesmas checagens antes de dar push:
+## Testes
 
 ```bash
-npm run lint:check && npm run typecheck && npm run build && npm run test:cov
-npm run migration:check && npm run test:e2e   # requer o PostgreSQL (docker compose up -d)
+npm test             # testes unitários
+npm run test:e2e     # testes end-to-end (requer o PostgreSQL rodando)
 ```
 
-## Scripts
-
-| Comando | O que faz |
-| --- | --- |
-| `npm run start:dev` | Inicia a API com hot reload |
-| `npm run build` | Compila o projeto para `dist/` |
-| `npm run start:prod` | Executa a versão compilada |
-| `npm run lint` | Roda o ESLint **corrigindo** o que for possível |
-| `npm run lint:check` | Roda o ESLint **sem alterar arquivos** (usado no CI) |
-| `npm run typecheck` | Checa os tipos de todo o código, inclusive testes, sem gerar arquivos |
-| `npm run format` | Formata o código com Prettier |
-| `npm test` | Testes unitários (mock do repositório) |
-| `npm run test:cov` | Testes com relatório de cobertura |
-| `npm run test:e2e` | Testes end-to-end contra o PostgreSQL de teste (requer `docker compose up -d`); recriam o schema a partir das migrations |
-| `npm run migration:*` | Gerenciam as migrations (veja a seção [Migrations](#migrations)) |
-| `npm run db:reset` | Recria o banco de desenvolvimento do zero e aplica as migrations (**apaga os dados**) |
-
-## Licença
-
-Projeto de estudo. Defina a licença no arquivo `LICENSE` antes de publicar.
+Os testes e o lint rodam automaticamente a cada push pelo GitHub Actions.
