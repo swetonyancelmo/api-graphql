@@ -1,5 +1,13 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
-import { IsInt, Max, Min, NotEquals } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  NotEquals,
+} from 'class-validator';
 import { MAX_STOCK_DELTA } from '../product.constants';
 
 @InputType()
@@ -15,4 +23,13 @@ export class AdjustStockInput {
   })
   @Max(MAX_STOCK_DELTA, { message: `A variação máxima é ${MAX_STOCK_DELTA}.` })
   delta: number;
+
+  @Field(() => String, {
+    nullable: true,
+    description: 'Motivo da movimentação (ex.: "Venda", "Compra", "Perda").',
+  })
+  @IsOptional()
+  @IsString({ message: 'O motivo deve ser um texto.' })
+  @MaxLength(200, { message: 'O motivo pode ter no máximo 200 caracteres.' })
+  reason?: string;
 }

@@ -51,7 +51,7 @@ O projeto está em evolução. O que já existe e o que está planejado:
 - [x] Autenticação com JWT: `login`, guard global, `@Public()` e `@CurrentUser()`
 - [x] Módulo de produtos com relação 1:N com `User`: cada usuário só enxerga e altera os próprios produtos
 - [x] Ajuste de estoque atômico (`adjustStock`), com proteção contra estoque negativo sob concorrência
-- [ ] Histórico de movimentações de estoque
+- [x] Histórico de movimentações de estoque (`stockMovements`), gravado na mesma transação do ajuste
 - [ ] DataLoader para evitar N+1
 - [ ] Paginação, filtros e ordenação
 - [ ] Subscriptions
@@ -209,7 +209,34 @@ mutation {
 }
 ```
 
+Opcionalmente, informe um motivo (até 200 caracteres) para constar no histórico:
+
+```graphql
+mutation {
+  adjustStock(id: "UUID", input: { delta: -3, reason: "Venda" }) {
+    quantity
+  }
+}
+```
+
 Regras: `delta` é um inteiro diferente de zero, entre -1.000.000 e 1.000.000; o estoque fica entre 0 e 1.000.000.000. Uma saída maior que o saldo responde *"Estoque insuficiente: há N unidade(s) e a saída é de M."* e não altera nada.
+
+### Consultar o histórico de estoque
+
+Lista as movimentações de um produto, da mais recente para a mais antiga. Criar um produto com `quantity > 0` registra a entrada inicial (*"Estoque inicial"*). `limit` (1 a 100, padrão 20) e `offset` paginam o resultado.
+
+```graphql
+query {
+  stockMovements(productId: "UUID", limit: 10, offset: 0) {
+    delta
+    quantityAfter
+    reason
+    createdAt
+  }
+}
+```
+
+A soma dos `delta` de um produto é sempre igual ao seu `quantity`, e o `quantityAfter` de cada linha é o saldo anterior mais o `delta`.
 
 Acessar, alterar ou remover o produto de outro usuário responde como se ele não existisse (`product` retorna `null`; `updateProduct` e `deleteProduct` retornam "não encontrado"), para não revelar IDs alheios.
 
@@ -235,7 +262,8 @@ src/
 │   └── decorators/                # @Public() e @CurrentUser()
 ├── products/
 │   ├── product.entity.ts          # Tabela `products` (FK `ownerId` → `users`, índice, cascade)
-│   ├── product.service.ts         # Toda consulta é filtrada pelo dono
+│   ├── product.service.ts         # Toda consulta é filtrada pelo dono; ajustes em transação
+│   ├── stock-movement.entity.ts   # Livro-razão do estoque (tabela `stock_movements`)
 │   ├── product.resolver.ts        # Usa @CurrentUser() para obter o dono
 │   └── dto/                       # Inputs de criação e atualização parcial
 └── users/
@@ -257,6 +285,7 @@ src/
 - **JWT sem Passport.** Para um único fluxo com Bearer token, `@nestjs/jwt` com um guard próprio é menos código e menos indireção. O guard também confere se o usuário do token ainda existe.
 - **Isolamento por dono na camada de serviço.** O `ownerId` nunca vem do cliente: o resolver o extrai do token e o service o aplica em toda consulta. Produto alheio responde como inexistente, e os testes e2e cobrem leitura, atualização e remoção entre dois usuários.
 - **Estoque atômico.** `adjustStock` é um único `UPDATE ... WHERE quantity + :delta BETWEEN 0 AND :max`. A regra vive no banco, então não existe a janela entre "ler o saldo" e "gravar o novo" em que duas requisições passariam juntas. Os testes e2e disparam dezenas de ajustes em paralelo e conferem o saldo final.
+- **Histórico como livro-razão.** Cada movimentação guarda a variação e o saldo resultante, e é gravada na mesma transação do `UPDATE` do estoque: ou os dois acontecem, ou nenhum. O `createdAt` usa `clock_timestamp()` (e não `now()`, que é o início da transação) para a ordem do histórico seguir a ordem real dos ajustes. Um teste e2e dispara 30 ajustes simultâneos e confere que a cadeia de saldos fecha.
 - **Hash de senha com bcrypt.** A coluna `password` usa `select: false`, então ela nem é carregada nas consultas comuns.
 - **UUID como chave primária.** Evita IDs previsíveis e colisões.
 - **`synchronize: true` só para estudo.** É prático em desenvolvimento, mas em produção o caminho correto é usar migrations (item do roadmap).

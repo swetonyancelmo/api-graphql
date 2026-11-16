@@ -5,6 +5,9 @@
 input AdjustStockInput {
   """Variação do estoque: positiva para entrada, negativa para saída."""
   delta: Int!
+
+  """Motivo da movimentação (ex.: "Venda", "Compra", "Perda")."""
+  reason: String
 }
 
 type AuthPayload {
@@ -26,6 +29,11 @@ input CreateUserInput {
   name: String!
   password: String!
 }
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
 
 input LoginInput {
   email: String!
@@ -61,8 +69,33 @@ type Query {
 
   """Produtos do usuário autenticado."""
   products: [Product!]!
+
+  """
+  Histórico de entradas e saídas de um produto, da mais recente para a mais antiga.
+  """
+  stockMovements(
+    """Máximo de registros."""
+    limit: Int! = 20
+
+    """Registros a pular."""
+    offset: Int! = 0
+    productId: ID!
+  ): [StockMovement!]!
   user(id: ID!): User
   users: [User!]!
+}
+
+type StockMovement {
+  createdAt: DateTime!
+
+  """Variação aplicada: positiva para entrada, negativa para saída."""
+  delta: Int!
+  id: ID!
+  productId: ID!
+
+  """Saldo do produto após esta movimentação."""
+  quantityAfter: Int!
+  reason: String
 }
 
 input UpdateProductInput {

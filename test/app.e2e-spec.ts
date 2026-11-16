@@ -481,6 +481,219 @@ describe('API GraphQL (e2e)', () => {
     });
   });
 
+  describe('histórico de estoque', () => {
+    let token: string;
+
+    const newProduct = async (quantity: number) => {
+      const res = await createProduct(token, quantity);
+      return res.body.data.createProduct.id as string;
+    };
+
+    const adjust = (id: string, delta: number, reason?: string, t = token) =>
+      gql(
+        `mutation {
+          adjustStock(id: "${id}", input: { delta: ${delta}${
+            reason ? `, reason: "${reason}"` : ''
+          } }) { quantity }
+        }`,
+        t,
+      );
+
+    const movements = (id: string, args = '', t = token) =>
+      gql(
+        `{ stockMovements(productId: "${id}"${args}) { delta quantityAfter reason createdAt } }`,
+        t,
+      );
+
+    const dbCount = async (): Promise<number> => {
+      const [{ count }] = await dataSource.query(
+        'SELECT count(*) FROM stock_movements',
+      );
+      return Number(count);
+    };
+
+    beforeEach(async () => {
+      token = await authenticate();
+    });
+
+    it('registra o estoque inicial ao criar o produto', async () => {
+      const id = await newProduct(10);
+
+      const res = await movements(id);
+
+      expect(res.body.data.stockMovements).toEqual([
+        expect.objectContaining({
+          delta: 10,
+          quantityAfter: 10,
+          reason: 'Estoque inicial',
+        }),
+      ]);
+    });
+
+    it('não registra movimentação quando o estoque inicial é zero', async () => {
+      const id = await newProduct(0);
+
+      const res = await movements(id);
+
+      expect(res.body.data.stockMovements).toEqual([]);
+    });
+
+    it('registra cada ajuste com variação, saldo resultante e motivo, do mais recente ao mais antigo', async () => {
+      const id = await newProduct(10);
+      await adjust(id, -3, 'Venda');
+      await adjust(id, 5, 'Compra');
+      await adjust(id, -1);
+
+      const res = await movements(id);
+
+      expect(
+        res.body.data.stockMovements.map(
+          (m: {
+            delta: number;
+            quantityAfter: number;
+            reason: string | null;
+          }) => [m.delta, m.quantityAfter, m.reason],
+        ),
+      ).toEqual([
+        [-1, 11, null],
+        [5, 12, 'Compra'],
+        [-3, 7, 'Venda'],
+        [10, 10, 'Estoque inicial'],
+      ]);
+    });
+
+    it('não registra nada quando o ajuste é rejeitado', async () => {
+      const id = await newProduct(2);
+      const before = await dbCount();
+
+      const res = await adjust(id, -5, 'Venda');
+
+      expect(res.body.errors[0].message).toContain('Estoque insuficiente');
+      expect(await dbCount()).toBe(before);
+    });
+
+    it('desfaz o ajuste se o registro do histórico falhar (transação)', async () => {
+      const id = await newProduct(10);
+      // Força uma falha no INSERT do histórico, depois do UPDATE do produto.
+      await dataSource.query(
+        `ALTER TABLE stock_movements ADD CONSTRAINT falha_forcada
+         CHECK (reason IS DISTINCT FROM 'falha-forcada')`,
+      );
+
+      try {
+        const res = await adjust(id, -4, 'falha-forcada');
+        expect(res.body.errors).toBeDefined();
+      } finally {
+        await dataSource.query(
+          'ALTER TABLE stock_movements DROP CONSTRAINT falha_forcada',
+        );
+      }
+
+      const [row] = await dataSource.query('SELECT quantity FROM products');
+      expect(row.quantity).toBe(10);
+      expect(await dbCount()).toBe(1); // só o estoque inicial
+    });
+
+    it('pagina com limit e offset', async () => {
+      const id = await newProduct(10);
+      await adjust(id, -1);
+      await adjust(id, -1);
+      await adjust(id, -1);
+
+      const first = await movements(id, ', limit: 2');
+      const second = await movements(id, ', limit: 2, offset: 2');
+
+      expect(
+        first.body.data.stockMovements.map(
+          (m: { quantityAfter: number }) => m.quantityAfter,
+        ),
+      ).toEqual([7, 8]);
+      expect(
+        second.body.data.stockMovements.map(
+          (m: { quantityAfter: number }) => m.quantityAfter,
+        ),
+      ).toEqual([9, 10]);
+    });
+
+    it('valida limit, offset e o formato do ID', async () => {
+      const id = await newProduct(1);
+
+      for (const args of [', limit: 0', ', limit: 101', ', offset: -1']) {
+        const res = await movements(id, args);
+        expect(res.body.errors[0].extensions.code).toBe('BAD_REQUEST');
+      }
+      const bad = await gql(
+        '{ stockMovements(productId: "nao-e-uuid") { delta } }',
+        token,
+      );
+      expect(bad.body.errors[0].extensions.code).toBe('BAD_REQUEST');
+    });
+
+    it('rejeita motivo maior que 200 caracteres', async () => {
+      const id = await newProduct(10);
+
+      const res = await adjust(id, 1, 'x'.repeat(201));
+
+      expect(res.body.errors[0].extensions.code).toBe('BAD_REQUEST');
+      expect(await dbCount()).toBe(1);
+    });
+
+    it('não permite ver o histórico de produto de outro usuário', async () => {
+      const id = await newProduct(10);
+      const outro = await authenticate('outro@exemplo.com');
+
+      const res = await movements(id, '', outro);
+
+      expect(res.body.errors[0].message).toContain('não encontrado');
+    });
+
+    it('exige autenticação', async () => {
+      const id = await newProduct(10);
+
+      const res = await gql(`{ stockMovements(productId: "${id}") { delta } }`);
+
+      expect(res.body.errors[0].message).toBe('Token de acesso ausente.');
+    });
+
+    it('remove o histórico junto com o produto', async () => {
+      const id = await newProduct(10);
+      await adjust(id, -1);
+
+      await gql(`mutation { deleteProduct(id: "${id}") { id } }`, token);
+
+      expect(await dbCount()).toBe(0);
+    });
+
+    it('mantém a consistência do livro-razão sob ajustes concorrentes', async () => {
+      const id = await newProduct(10);
+
+      // 30 ajustes simultâneos: parte passa, parte é recusada por falta de estoque.
+      await Promise.all([
+        ...Array.from({ length: 15 }, () => adjust(id, -1)),
+        ...Array.from({ length: 10 }, () => adjust(id, 2)),
+        ...Array.from({ length: 5 }, () => adjust(id, -4)),
+      ]);
+
+      const res = await movements(id, ', limit: 100');
+      const history: { delta: number; quantityAfter: number }[] =
+        res.body.data.stockMovements.reverse(); // do mais antigo ao mais recente
+      const [{ quantity }] = await dataSource.query(
+        'SELECT quantity FROM products',
+      );
+
+      // 1) Cada saldo é o anterior mais a variação: nenhuma movimentação se perdeu
+      //    nem foi gravada fora de ordem.
+      history.forEach((m, i) => {
+        const previous = i === 0 ? 0 : history[i - 1].quantityAfter;
+        expect(m.quantityAfter).toBe(previous + m.delta);
+        expect(m.quantityAfter).toBeGreaterThanOrEqual(0);
+      });
+      // 2) O último saldo do histórico é o saldo real, e a soma das variações bate.
+      expect(history[history.length - 1].quantityAfter).toBe(quantity);
+      expect(history.reduce((sum, m) => sum + m.delta, 0)).toBe(quantity);
+    });
+  });
+
   describe('isolamento entre usuários', () => {
     let tokenA: string;
     let tokenB: string;
