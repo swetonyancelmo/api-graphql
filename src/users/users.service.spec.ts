@@ -2,6 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
+import { QueryFailedError } from 'typeorm';
 import { UserEntity } from './user.entity';
 import { UsersService } from './users.service';
 
@@ -90,6 +91,32 @@ describe('UsersService', () => {
         email: input.email,
       });
       expect(result).not.toHaveProperty('password');
+    });
+
+    it('converte a violação de UNIQUE do banco em Conflict (cadastros simultâneos)', async () => {
+      // Passou pelo existsBy, mas outra requisição gravou o email antes do INSERT.
+      repository.save.mockRejectedValue(
+        new QueryFailedError(
+          'INSERT',
+          [],
+          Object.assign(new Error('duplicate key'), { code: '23505' }),
+        ),
+      );
+
+      await expect(service.create(input)).rejects.toThrow(
+        'Já existe um usuário com este email.',
+      );
+    });
+
+    it('propaga outros erros do banco sem convertê-los', async () => {
+      const failure = new QueryFailedError(
+        'INSERT',
+        [],
+        Object.assign(new Error('timeout'), { code: '57014' }),
+      );
+      repository.save.mockRejectedValue(failure);
+
+      await expect(service.create(input)).rejects.toBe(failure);
     });
 
     it('rejeita email já cadastrado sem salvar nada', async () => {

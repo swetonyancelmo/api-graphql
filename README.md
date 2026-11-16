@@ -55,7 +55,7 @@ O projeto está em evolução. O que já existe e o que está planejado:
 - [ ] DataLoader para evitar N+1
 - [ ] Paginação, filtros e ordenação
 - [ ] Subscriptions
-- [ ] Tratamento de erros customizado (`formatError`)
+- [x] Tratamento de erros padronizado (`formatError`): códigos estáveis, validação detalhada e nenhum detalhe interno exposto
 - [ ] CI com GitHub Actions
 - [ ] Dockerfile multi-stage e deploy
 
@@ -240,11 +240,39 @@ A soma dos `delta` de um produto é sempre igual ao seu `quantity`, e o `quantit
 
 Acessar, alterar ou remover o produto de outro usuário responde como se ele não existisse (`product` retorna `null`; `updateProduct` e `deleteProduct` retornam "não encontrado"), para não revelar IDs alheios.
 
-### Erros esperados
+### Erros
 
-- Sem token, token malformado, expirado ou de usuário removido: `UNAUTHENTICATED`. O login com senha errada e com email inexistente devolvem a mesma mensagem (*"Credenciais inválidas."*), para não revelar quais emails existem.
-- Email já cadastrado: `409 Conflict` com a mensagem *"Já existe um usuário com este email."*
-- Dados inválidos (nome vazio, email malformado, senha com menos de 6 caracteres): `400 Bad Request` com as mensagens de validação.
+Toda falha traz um `extensions.code` estável, sem stacktrace nem detalhes internos:
+
+| Código | Quando acontece |
+| --- | --- |
+| `UNAUTHENTICATED` | Sem token, token malformado, expirado ou de usuário removido; login com credenciais erradas (a mesma mensagem para senha errada e email inexistente, para não revelar quais emails existem) |
+| `BAD_REQUEST` | Dados inválidos, ID que não é UUID, estoque insuficiente |
+| `NOT_FOUND` | Produto inexistente ou de outro usuário |
+| `CONFLICT` | Email já cadastrado |
+| `GRAPHQL_VALIDATION_FAILED` / `GRAPHQL_PARSE_FAILED` | Consulta com campo inexistente ou sintaxe inválida (códigos padrão do GraphQL) |
+| `INTERNAL_SERVER_ERROR` | Falha inesperada. A resposta é genérica (*"Erro interno do servidor."*) e o detalhe vai apenas para o log |
+
+Erros de validação listam cada problema em `extensions.validationErrors`:
+
+```json
+{
+  "errors": [
+    {
+      "message": "Dados de entrada inválidos.",
+      "path": ["createUser"],
+      "extensions": {
+        "code": "BAD_REQUEST",
+        "validationErrors": [
+          "O nome não pode estar vazio.",
+          "O email não é válido.",
+          "A senha deve ter pelo menos 6 caracteres."
+        ]
+      }
+    }
+  ]
+}
+```
 
 ## Estrutura de pastas
 
@@ -253,6 +281,10 @@ src/
 ├── app.module.ts            # Módulo raiz: config, TypeORM e GraphQL
 ├── main.ts                  # Bootstrap
 ├── app.setup.ts             # ValidationPipe global (compartilhado com os testes e2e)
+├── common/
+│   ├── graphql-error.formatter.ts # formatError: códigos estáveis e erros internos escondidos
+│   ├── uuid.pipe.ts               # Valida argumentos ID antes de chegarem ao banco
+│   └── db-errors.ts               # Detecta violação de UNIQUE do PostgreSQL
 ├── schema.gql               # Schema gerado automaticamente
 ├── auth/
 │   ├── auth.module.ts             # JwtModule + guard global (APP_GUARD)
@@ -286,6 +318,7 @@ src/
 - **Isolamento por dono na camada de serviço.** O `ownerId` nunca vem do cliente: o resolver o extrai do token e o service o aplica em toda consulta. Produto alheio responde como inexistente, e os testes e2e cobrem leitura, atualização e remoção entre dois usuários.
 - **Estoque atômico.** `adjustStock` é um único `UPDATE ... WHERE quantity + :delta BETWEEN 0 AND :max`. A regra vive no banco, então não existe a janela entre "ler o saldo" e "gravar o novo" em que duas requisições passariam juntas. Os testes e2e disparam dezenas de ajustes em paralelo e conferem o saldo final.
 - **Histórico como livro-razão.** Cada movimentação guarda a variação e o saldo resultante, e é gravada na mesma transação do `UPDATE` do estoque: ou os dois acontecem, ou nenhum. O `createdAt` usa `clock_timestamp()` (e não `now()`, que é o início da transação) para a ordem do histórico seguir a ordem real dos ajustes. Um teste e2e dispara 30 ajustes simultâneos e confere que a cadeia de saldos fecha.
+- **Erros previsíveis e sem vazamento.** O `formatError` converte as exceções de domínio em códigos estáveis e troca qualquer falha inesperada por uma resposta genérica, registrando o detalhe só no log. A unicidade do email é garantida pela constraint do banco, e a violação vira `CONFLICT`: cadastros simultâneos com o mesmo email não geram erro 500.
 - **Hash de senha com bcrypt.** A coluna `password` usa `select: false`, então ela nem é carregada nas consultas comuns.
 - **UUID como chave primária.** Evita IDs previsíveis e colisões.
 - **`synchronize: true` só para estudo.** É prático em desenvolvimento, mas em produção o caminho correto é usar migrations (item do roadmap).
@@ -300,7 +333,7 @@ Ordem planejada de evolução:
 4. **Relações e N+1.** Entidade `Post` ligada a `User`, `@ResolveField` e DataLoader para agrupar consultas.
 5. **Consultas avançadas.** Paginação (cursor ou offset), filtros e ordenação.
 6. **Tempo real.** Subscriptions via WebSocket.
-7. **Erros.** `formatError` customizado, códigos de erro consistentes e descrições nos `@Field` do schema.
+7. **Erros.** ~~`formatError` e códigos consistentes~~ (feito). Falta completar as descrições (`description`) nos `@Field` do schema.
 8. **Qualidade e entrega.** Husky, lint-staged e commitlint; GitHub Actions rodando lint, testes e build; Dockerfile multi-stage; deploy com link público.
 
 ## Scripts

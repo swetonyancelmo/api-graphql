@@ -1,4 +1,5 @@
 import { Args, ID, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { UuidPipe } from '../common/uuid.pipe';
 import { UserDto } from './user.object-type';
 import { CreateUserInput } from './dto/create-user.input';
 import { UsersService } from './users.service';
@@ -16,7 +17,7 @@ export class UsersResolver {
   }
 
   @Query(() => UserDto, { name: 'user', nullable: true })
-  findOne(@Args('id', { type: () => ID }) id: string) {
+  findOne(@Args('id', { type: () => ID }, UuidPipe) id: string) {
     return this.usersService.findOne(id);
   }
 

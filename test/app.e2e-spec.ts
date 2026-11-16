@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -691,6 +691,178 @@ describe('API GraphQL (e2e)', () => {
       // 2) O último saldo do histórico é o saldo real, e a soma das variações bate.
       expect(history[history.length - 1].quantityAfter).toBe(quantity);
       expect(history.reduce((sum, m) => sum + m.delta, 0)).toBe(quantity);
+    });
+  });
+
+  describe('formato dos erros', () => {
+    const MISSING = '00000000-0000-0000-0000-000000000000';
+    let token: string;
+
+    beforeEach(async () => {
+      token = await authenticate();
+    });
+
+    type GqlError = { message: string; extensions: Record<string, unknown> };
+    const firstError = (res: request.Response) =>
+      res.body.errors[0] as GqlError;
+
+    it('devolve um código estável para cada tipo de falha', async () => {
+      const id = (await createProduct(token, 2)).body.data.createProduct.id;
+      await signUp('duplicado@exemplo.com');
+
+      const cases: [string, request.Response, string][] = [
+        ['sem token', await gql('{ me { id } }'), 'UNAUTHENTICATED'],
+        [
+          'login inválido',
+          await login('ana@exemplo.com', 'errada'),
+          'UNAUTHENTICATED',
+        ],
+        ['email duplicado', await signUp('duplicado@exemplo.com'), 'CONFLICT'],
+        [
+          'produto inexistente',
+          await gql(
+            `mutation { deleteProduct(id: "${MISSING}") { id } }`,
+            token,
+          ),
+          'NOT_FOUND',
+        ],
+        [
+          'estoque insuficiente',
+          await gql(
+            `mutation { adjustStock(id: "${id}", input: { delta: -9 }) { id } }`,
+            token,
+          ),
+          'BAD_REQUEST',
+        ],
+        [
+          'validação',
+          await gql(
+            'mutation { createUser(input: { name: "", email: "x", password: "1" }) { id } }',
+          ),
+          'BAD_REQUEST',
+        ],
+      ];
+
+      for (const [scenario, res, code] of cases) {
+        expect([scenario, firstError(res).extensions.code]).toEqual([
+          scenario,
+          code,
+        ]);
+      }
+    });
+
+    it('lista cada problema de validação em extensions.validationErrors', async () => {
+      const res = await gql(
+        'mutation { createUser(input: { name: "", email: "x", password: "1" }) { id } }',
+      );
+
+      expect(firstError(res).message).toBe('Dados de entrada inválidos.');
+      expect(firstError(res).extensions.validationErrors).toEqual(
+        expect.arrayContaining([
+          'O nome não pode estar vazio.',
+          'O email não é válido.',
+          'A senha deve ter pelo menos 6 caracteres.',
+        ]),
+      );
+    });
+
+    it('nunca expõe stacktrace, erro original ou caminhos do servidor', async () => {
+      const responses = [
+        await gql('{ me { id } }'),
+        await signUp('ana@exemplo.com'),
+        await gql(`mutation { deleteProduct(id: "${MISSING}") { id } }`, token),
+        await gql('{ product(id: "abc") { id } }', token),
+        await gql('{ campoInexistente }', token),
+        await gql('{ me { ', token),
+      ];
+
+      for (const res of responses) {
+        const body = JSON.stringify(res.body);
+        expect(body).not.toContain('stacktrace');
+        expect(body).not.toContain('originalError');
+        expect(body).not.toContain('/home/');
+        expect(body).not.toContain('node_modules');
+      }
+    });
+
+    it('mantém os códigos padrão do GraphQL para consulta mal formada', async () => {
+      const unknownField = await gql('{ campoInexistente }', token);
+      const syntax = await gql('{ me { ', token);
+
+      expect(firstError(unknownField).extensions.code).toBe(
+        'GRAPHQL_VALIDATION_FAILED',
+      );
+      expect(firstError(syntax).extensions.code).toBe('GRAPHQL_PARSE_FAILED');
+    });
+
+    it('rejeita IDs que não são UUID sem vazar o erro do Postgres', async () => {
+      const operations = [
+        '{ product(id: "abc") { id } }',
+        '{ user(id: "abc") { id } }',
+        'mutation { updateProduct(id: "abc", input: { name: "x" }) { id } }',
+        'mutation { deleteProduct(id: "abc") { id } }',
+        'mutation { adjustStock(id: "abc", input: { delta: 1 }) { id } }',
+        '{ stockMovements(productId: "abc") { delta } }',
+      ];
+
+      for (const operation of operations) {
+        const res = await gql(operation, token);
+        expect(firstError(res).extensions.code).toBe('BAD_REQUEST');
+        expect(JSON.stringify(res.body)).not.toContain('invalid input syntax');
+      }
+      expect(
+        firstError(await gql('{ product(id: "abc") { id } }', token)).message,
+      ).toBe('O ID informado não é um UUID válido.');
+    });
+
+    it('esconde falhas inesperadas do banco e registra o detalhe no log', async () => {
+      const logged = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      // Faz o INSERT falhar com um erro "de infraestrutura" do banco.
+      await dataSource.query(
+        `ALTER TABLE users ADD CONSTRAINT falha_forcada CHECK (name <> 'boom')`,
+      );
+
+      try {
+        const res = await gql(
+          'mutation { createUser(input: { name: "boom", email: "boom@exemplo.com", password: "segredo123" }) { id } }',
+        );
+
+        expect(firstError(res).message).toBe('Erro interno do servidor.');
+        expect(firstError(res).extensions).toEqual({
+          code: 'INTERNAL_SERVER_ERROR',
+        });
+        expect(JSON.stringify(res.body)).not.toContain('falha_forcada');
+        expect(JSON.stringify(res.body)).not.toContain('violates');
+        expect(logged).toHaveBeenCalledWith(
+          expect.stringContaining('createUser'),
+          expect.stringContaining('falha_forcada'),
+        );
+      } finally {
+        await dataSource.query(
+          'ALTER TABLE users DROP CONSTRAINT falha_forcada',
+        );
+        logged.mockRestore();
+      }
+    });
+
+    it('cadastros simultâneos com o mesmo email: um passa e os demais recebem CONFLICT', async () => {
+      const results = await Promise.all(
+        Array.from({ length: 10 }, () => signUp('corrida@exemplo.com')),
+      );
+
+      const succeeded = results.filter((r) => r.body.data?.createUser);
+      const failed = results.filter((r) => r.body.errors);
+      expect(succeeded).toHaveLength(1);
+      expect(failed).toHaveLength(9);
+      for (const res of failed) {
+        expect(firstError(res).extensions.code).toBe('CONFLICT');
+      }
+      const [{ count }] = await dataSource.query(
+        "SELECT count(*) FROM users WHERE email = 'corrida@exemplo.com'",
+      );
+      expect(count).toBe('1');
     });
   });
 

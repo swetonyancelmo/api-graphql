@@ -2,8 +2,11 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
+import { isUniqueViolation } from '../common/db-errors';
 import { CreateUserInput } from './dto/create-user.input';
 import { UserEntity } from './user.entity';
+
+const EMAIL_IN_USE = 'Já existe um usuário com este email.';
 
 @Injectable()
 export class UsersService {
@@ -30,7 +33,7 @@ export class UsersService {
   async create(input: CreateUserInput): Promise<UserEntity> {
     const exists = await this.usersRepository.existsBy({ email: input.email });
     if (exists) {
-      throw new ConflictException('Já existe um usuário com este email.');
+      throw new ConflictException(EMAIL_IN_USE);
     }
 
     const user = this.usersRepository.create({
@@ -38,7 +41,13 @@ export class UsersService {
       password: await bcrypt.hash(input.password, 10),
     });
 
-    const saved = await this.usersRepository.save(user);
+    let saved: UserEntity;
+    try {
+      saved = await this.usersRepository.save(user);
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ConflictException(EMAIL_IN_USE);
+      throw error;
+    }
 
     const { password: _password, ...safe } = saved;
     return safe as UserEntity;

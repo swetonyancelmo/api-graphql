@@ -1,4 +1,5 @@
 import { Args, ID, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { UuidPipe } from '../common/uuid.pipe';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserEntity } from '../users/user.entity';
 import { AdjustStockInput } from './dto/adjust-stock.input';
@@ -24,7 +25,7 @@ export class ProductResolver {
   @Query(() => ProductDto, { name: 'product', nullable: true })
   findOne(
     @CurrentUser() user: UserEntity,
-    @Args('id', { type: () => ID }) id: string,
+    @Args('id', { type: () => ID }, UuidPipe) id: string,
   ) {
     return this.productService.findOne(id, user.id);
   }
@@ -52,7 +53,7 @@ export class ProductResolver {
   @Mutation(() => ProductDto, { name: 'updateProduct' })
   updateProduct(
     @CurrentUser() user: UserEntity,
-    @Args('id', { type: () => ID }) id: string,
+    @Args('id', { type: () => ID }, UuidPipe) id: string,
     @Args('input') updateProductInput: UpdateProductInput,
   ) {
     return this.productService.update(id, user.id, updateProductInput);
@@ -65,7 +66,7 @@ export class ProductResolver {
   })
   adjustStock(
     @CurrentUser() user: UserEntity,
-    @Args('id', { type: () => ID }) id: string,
+    @Args('id', { type: () => ID }, UuidPipe) id: string,
     @Args('input') input: AdjustStockInput,
   ) {
     return this.productService.adjustStock(id, user.id, input);
@@ -74,7 +75,7 @@ export class ProductResolver {
   @Mutation(() => ProductDto, { name: 'deleteProduct' })
   deleteProduct(
     @CurrentUser() user: UserEntity,
-    @Args('id', { type: () => ID }) id: string,
+    @Args('id', { type: () => ID }, UuidPipe) id: string,
   ) {
     return this.productService.remove(id, user.id);
   }
