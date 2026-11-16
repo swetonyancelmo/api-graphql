@@ -47,7 +47,7 @@ O projeto está em evolução. O que já existe e o que está planejado:
 - [x] PostgreSQL via Docker Compose
 - [x] Configuração por variáveis de ambiente
 - [x] Testes unitários (services) e e2e (GraphQL + PostgreSQL de teste)
-- [ ] Migrations (hoje o TypeORM usa `synchronize`, só para desenvolvimento)
+- [x] Migrations versionadas do TypeORM (`synchronize` desligado); a API recusa subir com migrations pendentes
 - [x] Autenticação com JWT: `login`, guard global, `@Public()` e `@CurrentUser()`
 - [x] Módulo de produtos com relação 1:N com `User`: cada usuário só enxerga e altera os próprios produtos
 - [x] Ajuste de estoque atômico (`adjustStock`), com proteção contra estoque negativo sob concorrência
@@ -80,13 +80,46 @@ cp .env.example .env
 # 3. Suba o PostgreSQL
 docker compose up -d
 
-# 4. Inicie a API em modo desenvolvimento
+# 4. Crie as tabelas aplicando as migrations
+npm run migration:run
+
+# 5. Inicie a API em modo desenvolvimento
 npm run start:dev
 ```
 
 Abra o Apollo Sandbox em **http://localhost:3000/graphql** para explorar o schema e executar queries.
 
-Para parar o banco: `docker compose down` (adicione `-v` para apagar também os dados).
+Para parar o banco: `docker compose down` (adicione `-v` para apagar também os dados). Para recriar o banco do zero já com o schema atual: `npm run db:reset` (**apaga todos os dados**).
+
+## Migrations
+
+O schema do banco só muda por migrations versionadas em `src/database/migrations/`; o TypeORM nunca altera as tabelas sozinho (`synchronize: false`). Se houver migrations pendentes, a API não inicia e informa o comando a executar.
+
+Fluxo ao mudar uma entidade:
+
+```bash
+# 1. Edite a entidade (ex.: adicione uma coluna)
+
+# 2. Gere a migration comparando as entidades com o banco migrado
+npm run migration:generate -- src/database/migrations/AddPhoneToUsers
+
+# 3. REVISE o SQL gerado e aplique
+npm run migration:run
+```
+
+| Comando | O que faz |
+| --- | --- |
+| `npm run migration:run` | Aplica as migrations pendentes (cada uma roda em transação) |
+| `npm run migration:revert` | Desfaz a última migration aplicada |
+| `npm run migration:show` | Lista as migrations e se já foram aplicadas |
+| `npm run migration:generate -- <caminho>` | Gera uma migration a partir da diferença entre as entidades e o banco |
+| `npm run migration:create -- <caminho>` | Cria uma migration vazia, para SQL escrito à mão |
+| `npm run migration:check` | Falha (código 1) se as entidades divergem das migrations; ideal para o CI |
+| `npm run migration:run:prod` | Aplica as migrations a partir do código compilado (`dist/`), sem ts-node |
+
+Em produção: `npm run build && npm run migration:run:prod && npm run start:prod`.
+
+> Já tinha um banco criado antes das migrations (pelo `synchronize`)? Rodar `migration:run` nele falha com `relation "users" already exists`, sem alterar nada. Recrie-o com `npm run db:reset` (apaga os dados).
 
 ### Variáveis de ambiente
 
@@ -281,6 +314,11 @@ src/
 ├── app.module.ts            # Módulo raiz: config, TypeORM e GraphQL
 ├── main.ts                  # Bootstrap
 ├── app.setup.ts             # ValidationPipe global (compartilhado com os testes e2e)
+├── database/
+│   ├── database.config.ts         # Configuração única do banco (app e CLI), synchronize desligado
+│   ├── data-source.ts             # DataSource usado pela CLI de migrations
+│   ├── pending-migrations.ts      # Impede a API de subir com migrations pendentes
+│   └── migrations/                # Migrations versionadas (up/down)
 ├── common/
 │   ├── graphql-error.formatter.ts # formatError: códigos estáveis e erros internos escondidos
 │   ├── uuid.pipe.ts               # Valida argumentos ID antes de chegarem ao banco
@@ -321,14 +359,14 @@ src/
 - **Erros previsíveis e sem vazamento.** O `formatError` converte as exceções de domínio em códigos estáveis e troca qualquer falha inesperada por uma resposta genérica, registrando o detalhe só no log. A unicidade do email é garantida pela constraint do banco, e a violação vira `CONFLICT`: cadastros simultâneos com o mesmo email não geram erro 500.
 - **Hash de senha com bcrypt.** A coluna `password` usa `select: false`, então ela nem é carregada nas consultas comuns.
 - **UUID como chave primária.** Evita IDs previsíveis e colisões.
-- **`synchronize: true` só para estudo.** É prático em desenvolvimento, mas em produção o caminho correto é usar migrations (item do roadmap).
+- **Migrations em vez de `synchronize`.** O schema evolui por arquivos versionados e revisáveis, com `up` e `down`. Os testes e2e recriam o banco de testes aplicando essas mesmas migrations, então elas são exercitadas a cada execução. A configuração do banco fica em um só lugar (`database.config.ts`), usada pela aplicação e pela CLI.
 
 ## Roadmap
 
 Ordem planejada de evolução:
 
 1. **Testes.** ~~Unitários e e2e~~ (feito). Falta rodar tudo com cobertura no CI e cobrir resolvers e autorização.
-2. **Migrations.** Trocar `synchronize` por migrations versionadas do TypeORM.
+2. **Migrations.** ~~Trocar `synchronize` por migrations~~ (feito). Falta rodar `migration:check` no CI e, no deploy, aplicar as migrations antes de subir a nova versão.
 3. **Autenticação.** ~~JWT, guard global e `@CurrentUser()`~~ (feito). Falta refresh token e rate limit no login.
 4. **Relações e N+1.** Entidade `Post` ligada a `User`, `@ResolveField` e DataLoader para agrupar consultas.
 5. **Consultas avançadas.** Paginação (cursor ou offset), filtros e ordenação.
@@ -347,7 +385,9 @@ Ordem planejada de evolução:
 | `npm run format` | Formata o código com Prettier |
 | `npm test` | Testes unitários (mock do repositório) |
 | `npm run test:cov` | Testes com relatório de cobertura |
-| `npm run test:e2e` | Testes end-to-end contra o PostgreSQL de teste (requer `docker compose up -d`) |
+| `npm run test:e2e` | Testes end-to-end contra o PostgreSQL de teste (requer `docker compose up -d`); recriam o schema a partir das migrations |
+| `npm run migration:*` | Gerenciam as migrations (veja a seção [Migrations](#migrations)) |
+| `npm run db:reset` | Recria o banco de desenvolvimento do zero e aplica as migrations (**apaga os dados**) |
 
 ## Licença
 

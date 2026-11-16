@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module';
 import { ProductModule } from './products/product.module';
 import { AuthModule } from './auth/auth.module';
 import { formatGraphQLError } from './common/graphql-error.formatter';
+import { buildDataSourceOptions } from './database/database.config';
 
 @Module({
   imports: [
@@ -15,15 +16,14 @@ import { formatGraphQLError } from './common/graphql-error.formatter';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        host: config.get('DB_HOST', 'localhost'),
-        port: config.get<number>('DB_PORT', 5432),
-        username: config.get('DB_USER', 'postgres'),
-        password: config.get('DB_PASSWORD', 'postgres'),
-        database: config.get('DB_NAME', 'estudos_graphql'),
+        ...buildDataSourceOptions({
+          DB_HOST: config.get('DB_HOST'),
+          DB_PORT: config.get('DB_PORT'),
+          DB_USER: config.get('DB_USER'),
+          DB_PASSWORD: config.get('DB_PASSWORD'),
+          DB_NAME: config.get('DB_NAME'),
+        }),
         autoLoadEntities: true,
-        // Apenas para estudo. Em produção, trocar por migrations.
-        synchronize: true,
       }),
     }),
     UsersModule,
