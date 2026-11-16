@@ -189,12 +189,14 @@ mutation {
 
 query { products { id name quantity } }
 
-mutation { updateProduct(id: "UUID", input: { quantity: 7 }) { id quantity } }
+mutation { updateProduct(id: "UUID", input: { name: "Teclado Gamer", unitPriceCents: 25000 }) { id name unitPriceCents } }
 
 mutation { deleteProduct(id: "UUID") { id name } }
 ```
 
 ### Ajustar o estoque
+
+A quantidade só é definida na criação do produto (saldo inicial). Depois disso, o estoque muda exclusivamente por `adjustStock`; o `updateProduct` não aceita `quantity`.
 
 `delta` positivo registra uma entrada e negativo, uma saída. A operação é atômica: o estoque nunca fica negativo, mesmo com várias requisições simultâneas.
 

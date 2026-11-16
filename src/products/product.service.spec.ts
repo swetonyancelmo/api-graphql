@@ -115,12 +115,14 @@ describe('ProductService', () => {
       repository.findOneBy.mockResolvedValue(product());
       repository.save.mockImplementation((p) => Promise.resolve(p));
 
-      const result = await service.update('p-1', OWNER, { quantity: 7 });
+      const result = await service.update('p-1', OWNER, {
+        unitPriceCents: 25000,
+      });
 
       expect(result).toMatchObject({
         name: 'Teclado',
-        quantity: 7,
-        unitPriceCents: 19990,
+        quantity: 10,
+        unitPriceCents: 25000,
       });
       expect(repository.findOneBy).toHaveBeenCalledWith({
         id: 'p-1',
@@ -131,9 +133,9 @@ describe('ProductService', () => {
     it('lança NotFoundException quando o produto não existe para esse dono', async () => {
       repository.findOneBy.mockResolvedValue(null);
 
-      await expect(service.update('x', OWNER, { quantity: 1 })).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.update('x', OWNER, { name: 'Novo' }),
+      ).rejects.toThrow(NotFoundException);
       expect(repository.save).not.toHaveBeenCalled();
     });
   });

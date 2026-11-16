@@ -243,14 +243,14 @@ describe('API GraphQL (e2e)', () => {
 
       const updated = await gql(
         `mutation {
-          updateProduct(id: "${id}", input: { quantity: 7 }) { name quantity unitPriceCents }
+          updateProduct(id: "${id}", input: { unitPriceCents: 25000 }) { name quantity unitPriceCents }
         }`,
         token,
       ).expect(200);
       expect(updated.body.data.updateProduct).toEqual({
         name: 'Teclado',
-        quantity: 7,
-        unitPriceCents: 19990,
+        quantity: 10,
+        unitPriceCents: 25000,
       });
 
       const removed = await gql(
@@ -307,6 +307,21 @@ describe('API GraphQL (e2e)', () => {
       expect(count).toBe('0');
     });
 
+    it('não permite alterar o estoque pelo updateProduct (só por adjustStock)', async () => {
+      const token = await authenticate();
+      const created = await createProduct(token, 10);
+      const { id } = created.body.data.createProduct;
+
+      const res = await gql(
+        `mutation { updateProduct(id: "${id}", input: { quantity: 999 }) { id } }`,
+        token,
+      );
+
+      expect(res.body.errors[0].message).toContain('quantity');
+      const [row] = await dataSource.query('SELECT quantity FROM products');
+      expect(row.quantity).toBe(10);
+    });
+
     it('rejeita quantidade negativa', async () => {
       const token = await authenticate();
 
@@ -320,7 +335,7 @@ describe('API GraphQL (e2e)', () => {
       const missing = '00000000-0000-0000-0000-000000000000';
 
       const update = await gql(
-        `mutation { updateProduct(id: "${missing}", input: { quantity: 1 }) { id } }`,
+        `mutation { updateProduct(id: "${missing}", input: { name: "Novo" }) { id } }`,
         token,
       );
       const remove = await gql(

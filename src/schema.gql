@@ -68,7 +68,6 @@ type Query {
 input UpdateProductInput {
   description: String
   name: String
-  quantity: Int
 
   """Preço unitário em centavos."""
   unitPriceCents: Int
