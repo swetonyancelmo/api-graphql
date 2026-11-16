@@ -1,5 +1,7 @@
 # Estudos GraphQL
 
+[![CI](https://github.com/swetonyancelmo/api-graphql/actions/workflows/ci.yml/badge.svg)](https://github.com/swetonyancelmo/api-graphql/actions/workflows/ci.yml)
+
 API GraphQL construída com **NestJS**, **Apollo Server**, **TypeORM** e **PostgreSQL**, desenvolvida como projeto de estudo para praticar boas práticas de back-end: camadas bem separadas, validação, persistência real, testes e CI.
 
 ![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)
@@ -56,7 +58,7 @@ O projeto está em evolução. O que já existe e o que está planejado:
 - [ ] Paginação, filtros e ordenação
 - [ ] Subscriptions
 - [x] Tratamento de erros padronizado (`formatError`): códigos estáveis, validação detalhada e nenhum detalhe interno exposto
-- [ ] CI com GitHub Actions
+- [x] CI com GitHub Actions: lint, tipos, build, testes unitários, migrations e e2e com PostgreSQL
 - [ ] Dockerfile multi-stage e deploy
 
 Veja detalhes no [Roadmap](#roadmap).
@@ -65,7 +67,7 @@ Veja detalhes no [Roadmap](#roadmap).
 
 ### Pré-requisitos
 
-- Node.js 20 ou superior
+- Node.js 24 (a versão está no arquivo `.nvmrc`; com o nvm, basta `nvm use`)
 - Docker e Docker Compose
 
 ### Passo a passo
@@ -372,7 +374,23 @@ Ordem planejada de evolução:
 5. **Consultas avançadas.** Paginação (cursor ou offset), filtros e ordenação.
 6. **Tempo real.** Subscriptions via WebSocket.
 7. **Erros.** ~~`formatError` e códigos consistentes~~ (feito). Falta completar as descrições (`description`) nos `@Field` do schema.
-8. **Qualidade e entrega.** Husky, lint-staged e commitlint; GitHub Actions rodando lint, testes e build; Dockerfile multi-stage; deploy com link público.
+8. **Qualidade e entrega.** ~~GitHub Actions~~ (feito). Falta Husky, lint-staged e commitlint; Dockerfile multi-stage; deploy com link público.
+
+## Integração contínua (CI)
+
+A cada push em `main`/`master` e a cada Pull Request, o GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) roda dois jobs em paralelo:
+
+| Job | O que verifica |
+| --- | --- |
+| **Lint, tipos, build e testes unitários** | ESLint + Prettier, checagem de tipos de todo o código (inclusive dos testes), build e testes unitários com relatório de cobertura (guardado como *artifact*) |
+| **Migrations e testes e2e** | Sobe um PostgreSQL, aplica as migrations a partir do código compilado, confirma que as entidades não divergem delas (`migration:check`) e roda os testes end-to-end |
+
+Para rodar localmente as mesmas checagens antes de dar push:
+
+```bash
+npm run lint:check && npm run typecheck && npm run build && npm run test:cov
+npm run migration:check && npm run test:e2e   # requer o PostgreSQL (docker compose up -d)
+```
 
 ## Scripts
 
@@ -381,7 +399,9 @@ Ordem planejada de evolução:
 | `npm run start:dev` | Inicia a API com hot reload |
 | `npm run build` | Compila o projeto para `dist/` |
 | `npm run start:prod` | Executa a versão compilada |
-| `npm run lint` | Roda o ESLint com correção automática |
+| `npm run lint` | Roda o ESLint **corrigindo** o que for possível |
+| `npm run lint:check` | Roda o ESLint **sem alterar arquivos** (usado no CI) |
+| `npm run typecheck` | Checa os tipos de todo o código, inclusive testes, sem gerar arquivos |
 | `npm run format` | Formata o código com Prettier |
 | `npm test` | Testes unitários (mock do repositório) |
 | `npm run test:cov` | Testes com relatório de cobertura |
