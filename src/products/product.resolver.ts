@@ -1,6 +1,7 @@
 import { Args, ID, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserEntity } from '../users/user.entity';
+import { AdjustStockInput } from './dto/adjust-stock.input';
 import { CreateProductInput } from './dto/create-product.input';
 import { UpdateProductInput } from './dto/update-product.input';
 import { ProductDto } from './product.object-type';
@@ -41,6 +42,19 @@ export class ProductResolver {
     @Args('input') updateProductInput: UpdateProductInput,
   ) {
     return this.productService.update(id, user.id, updateProductInput);
+  }
+
+  @Mutation(() => ProductDto, {
+    name: 'adjustStock',
+    description:
+      'Soma uma variação ao estoque de forma atômica. Falha se o estoque ficaria negativo.',
+  })
+  adjustStock(
+    @CurrentUser() user: UserEntity,
+    @Args('id', { type: () => ID }) id: string,
+    @Args('input') input: AdjustStockInput,
+  ) {
+    return this.productService.adjustStock(id, user.id, input);
   }
 
   @Mutation(() => ProductDto, { name: 'deleteProduct' })

@@ -1,8 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AdjustStockInput } from './dto/adjust-stock.input';
 import { CreateProductInput } from './dto/create-product.input';
 import { UpdateProductInput } from './dto/update-product.input';
+import { MAX_QUANTITY } from './product.constants';
 import { ProductEntity } from './product.entity';
 
 @Injectable()
@@ -36,6 +42,34 @@ export class ProductService {
     const product = await this.findOrFail(id, ownerId);
     Object.assign(product, input);
     return this.productsRepository.save(product);
+  }
+
+  async adjustStock(
+    id: string,
+    ownerId: string,
+    { delta }: AdjustStockInput,
+  ): Promise<ProductEntity> {
+    const result = await this.productsRepository
+      .createQueryBuilder()
+      .update(ProductEntity)
+      .set({ quantity: () => '"quantity" + :delta' })
+      .where('"id" = :id AND "ownerId" = :ownerId', { id, ownerId })
+      .andWhere('"quantity" + :delta BETWEEN 0 AND :max')
+      .setParameters({ delta, max: MAX_QUANTITY })
+      .returning('*')
+      .execute();
+
+    const [row] = result.raw as ProductEntity[];
+    if (row) {
+      return this.productsRepository.create(row);
+    }
+
+    const product = await this.findOrFail(id, ownerId);
+    throw new BadRequestException(
+      delta < 0
+        ? `Estoque insuficiente: há ${product.quantity} unidade(s) e a saída é de ${-delta}.`
+        : `O estoque não pode ultrapassar ${MAX_QUANTITY} unidades.`,
+    );
   }
 
   async remove(id: string, ownerId: string): Promise<ProductEntity> {

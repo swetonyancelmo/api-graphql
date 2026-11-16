@@ -1,6 +1,7 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { MAX_QUANTITY } from './product.constants';
 import { ProductEntity } from './product.entity';
 import { ProductService } from './product.service';
 
@@ -12,6 +13,18 @@ describe('ProductService', () => {
     create: jest.fn(),
     save: jest.fn(),
     remove: jest.fn(),
+    createQueryBuilder: jest.fn(),
+  };
+
+  // Query builder encadeável: cada método devolve o próprio builder.
+  const queryBuilder = {
+    update: jest.fn().mockReturnThis(),
+    set: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    setParameters: jest.fn().mockReturnThis(),
+    returning: jest.fn().mockReturnThis(),
+    execute: jest.fn(),
   };
 
   const OWNER = 'owner-1';
@@ -28,6 +41,10 @@ describe('ProductService', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    for (const fn of Object.values(queryBuilder)) {
+      if (fn !== queryBuilder.execute) fn.mockReturnThis();
+    }
+    repository.createQueryBuilder.mockReturnValue(queryBuilder);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -118,6 +135,64 @@ describe('ProductService', () => {
         NotFoundException,
       );
       expect(repository.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('adjustStock', () => {
+    it('aplica o ajuste em um único UPDATE restrito ao dono e à faixa válida', async () => {
+      queryBuilder.execute.mockResolvedValue({
+        raw: [{ ...product(), quantity: 7 }],
+      });
+      repository.create.mockImplementation((row: object) => row);
+
+      const result = await service.adjustStock('p-1', OWNER, { delta: -3 });
+
+      expect(result.quantity).toBe(7);
+      expect(queryBuilder.where).toHaveBeenCalledWith(
+        '"id" = :id AND "ownerId" = :ownerId',
+        { id: 'p-1', ownerId: OWNER },
+      );
+      expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+        '"quantity" + :delta BETWEEN 0 AND :max',
+      );
+      expect(queryBuilder.setParameters).toHaveBeenCalledWith({
+        delta: -3,
+        max: MAX_QUANTITY,
+      });
+      // Atômico: nenhuma leitura nem save separados no caminho feliz.
+      expect(repository.findOneBy).not.toHaveBeenCalled();
+      expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('lança NotFoundException quando o produto não existe para esse dono', async () => {
+      queryBuilder.execute.mockResolvedValue({ raw: [] });
+      repository.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.adjustStock('x', OWNER, { delta: -1 }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejeita saída maior que o estoque, informando o saldo atual', async () => {
+      queryBuilder.execute.mockResolvedValue({ raw: [] });
+      repository.findOneBy.mockResolvedValue({ ...product(), quantity: 2 });
+
+      const promise = service.adjustStock('p-1', OWNER, { delta: -5 });
+
+      await expect(promise).rejects.toThrow(BadRequestException);
+      await expect(promise).rejects.toThrow(/há 2 unidade\(s\).*saída é de 5/);
+    });
+
+    it('rejeita entrada que ultrapassaria o estoque máximo', async () => {
+      queryBuilder.execute.mockResolvedValue({ raw: [] });
+      repository.findOneBy.mockResolvedValue({
+        ...product(),
+        quantity: MAX_QUANTITY,
+      });
+
+      await expect(
+        service.adjustStock('p-1', OWNER, { delta: 1 }),
+      ).rejects.toThrow(/não pode ultrapassar/);
     });
   });
 

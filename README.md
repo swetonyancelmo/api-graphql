@@ -50,7 +50,8 @@ O projeto está em evolução. O que já existe e o que está planejado:
 - [ ] Migrations (hoje o TypeORM usa `synchronize`, só para desenvolvimento)
 - [x] Autenticação com JWT: `login`, guard global, `@Public()` e `@CurrentUser()`
 - [x] Módulo de produtos com relação 1:N com `User`: cada usuário só enxerga e altera os próprios produtos
-- [ ] Ajuste de estoque atômico (`adjustStock`) e histórico de movimentações
+- [x] Ajuste de estoque atômico (`adjustStock`), com proteção contra estoque negativo sob concorrência
+- [ ] Histórico de movimentações de estoque
 - [ ] DataLoader para evitar N+1
 - [ ] Paginação, filtros e ordenação
 - [ ] Subscriptions
@@ -193,6 +194,21 @@ mutation { updateProduct(id: "UUID", input: { quantity: 7 }) { id quantity } }
 mutation { deleteProduct(id: "UUID") { id name } }
 ```
 
+### Ajustar o estoque
+
+`delta` positivo registra uma entrada e negativo, uma saída. A operação é atômica: o estoque nunca fica negativo, mesmo com várias requisições simultâneas.
+
+```graphql
+mutation {
+  adjustStock(id: "UUID", input: { delta: -3 }) {
+    id
+    quantity
+  }
+}
+```
+
+Regras: `delta` é um inteiro diferente de zero, entre -1.000.000 e 1.000.000; o estoque fica entre 0 e 1.000.000.000. Uma saída maior que o saldo responde *"Estoque insuficiente: há N unidade(s) e a saída é de M."* e não altera nada.
+
 Acessar, alterar ou remover o produto de outro usuário responde como se ele não existisse (`product` retorna `null`; `updateProduct` e `deleteProduct` retornam "não encontrado"), para não revelar IDs alheios.
 
 ### Erros esperados
@@ -238,6 +254,7 @@ src/
 - **Seguro por padrão.** O `JwtAuthGuard` é global: toda operação exige token, e só as marcadas com `@Public()` escapam. Esquecer de proteger uma rota nova não deixa um buraco.
 - **JWT sem Passport.** Para um único fluxo com Bearer token, `@nestjs/jwt` com um guard próprio é menos código e menos indireção. O guard também confere se o usuário do token ainda existe.
 - **Isolamento por dono na camada de serviço.** O `ownerId` nunca vem do cliente: o resolver o extrai do token e o service o aplica em toda consulta. Produto alheio responde como inexistente, e os testes e2e cobrem leitura, atualização e remoção entre dois usuários.
+- **Estoque atômico.** `adjustStock` é um único `UPDATE ... WHERE quantity + :delta BETWEEN 0 AND :max`. A regra vive no banco, então não existe a janela entre "ler o saldo" e "gravar o novo" em que duas requisições passariam juntas. Os testes e2e disparam dezenas de ajustes em paralelo e conferem o saldo final.
 - **Hash de senha com bcrypt.** A coluna `password` usa `select: false`, então ela nem é carregada nas consultas comuns.
 - **UUID como chave primária.** Evita IDs previsíveis e colisões.
 - **`synchronize: true` só para estudo.** É prático em desenvolvimento, mas em produção o caminho correto é usar migrations (item do roadmap).

@@ -2,6 +2,11 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+input AdjustStockInput {
+  """Variação do estoque: positiva para entrada, negativa para saída."""
+  delta: Int!
+}
+
 type AuthPayload {
   """JWT para enviar no header `Authorization: Bearer <token>`."""
   accessToken: String!
@@ -28,6 +33,10 @@ input LoginInput {
 }
 
 type Mutation {
+  """
+  Soma uma variação ao estoque de forma atômica. Falha se o estoque ficaria negativo.
+  """
+  adjustStock(id: ID!, input: AdjustStockInput!): Product!
   createProduct(input: CreateProductInput!): Product!
   createUser(input: CreateUserInput!): User!
   deleteProduct(id: ID!): Product!

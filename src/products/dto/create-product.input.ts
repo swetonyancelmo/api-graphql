@@ -1,5 +1,6 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
-import { IsInt, IsNotEmpty, IsString, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsString, Max, Min } from 'class-validator';
+import { MAX_QUANTITY } from '../product.constants';
 
 @InputType()
 export class CreateProductInput {
@@ -14,6 +15,7 @@ export class CreateProductInput {
   @Field(() => Int)
   @IsInt({ message: 'A quantidade deve ser um número inteiro.' })
   @Min(0, { message: 'A quantidade não pode ser negativa.' })
+  @Max(MAX_QUANTITY, { message: `A quantidade máxima é ${MAX_QUANTITY}.` })
   quantity: number;
 
   @Field(() => Int, { description: 'Preço unitário em centavos.' })

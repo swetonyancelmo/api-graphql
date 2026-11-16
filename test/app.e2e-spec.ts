@@ -333,6 +333,139 @@ describe('API GraphQL (e2e)', () => {
     });
   });
 
+  describe('ajuste de estoque', () => {
+    let token: string;
+    let productId: string;
+
+    const adjust = (delta: number, id = productId, t = token) =>
+      gql(
+        `mutation { adjustStock(id: "${id}", input: { delta: ${delta} }) { id quantity } }`,
+        t,
+      );
+
+    const currentQuantity = async (): Promise<number> => {
+      const [row] = await dataSource.query('SELECT quantity FROM products');
+      return row.quantity as number;
+    };
+
+    beforeEach(async () => {
+      token = await authenticate();
+      const created = await createProduct(token, 10);
+      productId = created.body.data.createProduct.id;
+    });
+
+    it('registra entrada e saída de estoque', async () => {
+      const entrada = await adjust(5);
+      expect(entrada.body.data.adjustStock).toEqual({
+        id: productId,
+        quantity: 15,
+      });
+
+      const saida = await adjust(-4);
+      expect(saida.body.data.adjustStock.quantity).toBe(11);
+      expect(await currentQuantity()).toBe(11);
+    });
+
+    it('permite zerar o estoque exatamente', async () => {
+      const res = await adjust(-10);
+
+      expect(res.body.data.adjustStock.quantity).toBe(0);
+    });
+
+    it('rejeita saída maior que o estoque e não altera o saldo', async () => {
+      const res = await adjust(-11);
+
+      expect(res.body.errors[0].message).toContain('Estoque insuficiente');
+      expect(res.body.errors[0].message).toContain('há 10 unidade(s)');
+      expect(await currentQuantity()).toBe(10);
+    });
+
+    it('rejeita variação zero e fora do limite', async () => {
+      for (const delta of [0, 1_000_001, -1_000_001]) {
+        const res = await adjust(delta);
+        expect(res.body.errors[0].extensions.code).toBe('BAD_REQUEST');
+      }
+      expect(await currentQuantity()).toBe(10);
+    });
+
+    it('rejeita variação não inteira', async () => {
+      const res = await gql(
+        `mutation { adjustStock(id: "${productId}", input: { delta: 1.5 }) { id } }`,
+        token,
+      );
+
+      expect(res.body.errors).toBeDefined();
+      expect(await currentQuantity()).toBe(10);
+    });
+
+    it('rejeita entrada que ultrapassa o estoque máximo', async () => {
+      await dataSource.query('UPDATE products SET quantity = 999999999');
+
+      const res = await adjust(2);
+
+      expect(res.body.errors[0].message).toContain('não pode ultrapassar');
+      expect(await currentQuantity()).toBe(999999999);
+    });
+
+    it('retorna erro para produto inexistente', async () => {
+      const res = await adjust(1, '00000000-0000-0000-0000-000000000000');
+
+      expect(res.body.errors[0].message).toContain('não encontrado');
+    });
+
+    it('não permite ajustar o estoque de outro usuário', async () => {
+      const outro = await authenticate('outro@exemplo.com');
+
+      const res = await adjust(-1, productId, outro);
+
+      expect(res.body.errors[0].message).toContain('não encontrado');
+      expect(await currentQuantity()).toBe(10);
+    });
+
+    it('exige autenticação', async () => {
+      const res = await gql(
+        `mutation { adjustStock(id: "${productId}", input: { delta: 1 }) { id } }`,
+      );
+
+      expect(res.body.errors[0].message).toBe('Token de acesso ausente.');
+    });
+
+    describe('concorrência', () => {
+      it('20 saídas simultâneas de 1 em um estoque de 10: exatamente 10 passam', async () => {
+        const results = await Promise.all(
+          Array.from({ length: 20 }, () => adjust(-1)),
+        );
+
+        const succeeded = results.filter((r) => r.body.data?.adjustStock);
+        const failed = results.filter((r) => r.body.errors);
+        expect(succeeded).toHaveLength(10);
+        expect(failed).toHaveLength(10);
+        expect(await currentQuantity()).toBe(0);
+      });
+
+      it('nunca deixa o estoque negativo com saídas de tamanhos diferentes', async () => {
+        // 5 saídas de 3 em um estoque de 10: só 3 cabem (9), sobra 1.
+        const results = await Promise.all(
+          Array.from({ length: 5 }, () => adjust(-3)),
+        );
+
+        expect(results.filter((r) => r.body.data?.adjustStock)).toHaveLength(3);
+        expect(await currentQuantity()).toBe(1);
+      });
+
+      it('não perde atualizações quando entradas e saídas se misturam', async () => {
+        // 10 entradas de +2 e 10 saídas de -1, todas simultâneas: saldo final = 10 + 20 - 10.
+        const results = await Promise.all([
+          ...Array.from({ length: 10 }, () => adjust(2)),
+          ...Array.from({ length: 10 }, () => adjust(-1)),
+        ]);
+
+        expect(results.every((r) => r.body.data?.adjustStock)).toBe(true);
+        expect(await currentQuantity()).toBe(20);
+      });
+    });
+  });
+
   describe('isolamento entre usuários', () => {
     let tokenA: string;
     let tokenB: string;
